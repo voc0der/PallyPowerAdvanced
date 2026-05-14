@@ -195,6 +195,162 @@ test("runtime context refresh repairs PallyPower cooldown tables after ScanSpell
 	_G.MAX_PARTY_MEMBERS = old.MAX_PARTY_MEMBERS
 end)
 
+test("assignment alert reports class-wide changes for the local paladin", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+	}
+	local messages = {}
+
+	_G.PallyPower = {player = "Holyone"}
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.PallyPower_Assignments = {Holyone = {[1] = 0}}
+	_G.PallyPower_NormalAssignments = {Holyone = {}}
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+
+	local before = T.SnapshotOwnAssignments()
+	_G.PallyPower_Assignments.Holyone[1] = T.BUFF_KINGS
+	local after = T.SnapshotOwnAssignments()
+	T.ReportAssignmentChanges("Leadadin", before, after)
+
+	assertEquals(
+		messages[1],
+		"|cff33ff99PPA|r: Leadadin has assigned you to Blessing of Kings all Warriors.",
+		"class-wide assignment alert"
+	)
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+end)
+
+test("assignment alert reports single-buff changes for the local paladin", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+	}
+	local messages = {}
+
+	_G.PallyPower = {player = "Holyone"}
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.PallyPower_Assignments = {Holyone = {}}
+	_G.PallyPower_NormalAssignments = {Holyone = {[1] = {}}}
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+
+	local before = T.SnapshotOwnAssignments()
+	_G.PallyPower_NormalAssignments.Holyone[1].Billwarrior = T.BUFF_KINGS
+	local after = T.SnapshotOwnAssignments()
+	T.ReportAssignmentChanges("Leadadin", before, after)
+
+	assertEquals(
+		messages[1],
+		"|cff33ff99PPA|r: Leadadin has assigned you to single buff Blessing of Kings to Billwarrior.",
+		"single-buff assignment alert"
+	)
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+end)
+
+test("assignment alert ignores local paladin changes", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+	}
+	local messages = {}
+
+	_G.PallyPower = {player = "Holyone"}
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.PallyPower_Assignments = {Holyone = {[1] = 0}}
+	_G.PallyPower_NormalAssignments = {Holyone = {}}
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+
+	local before = T.SnapshotOwnAssignments()
+	_G.PallyPower_Assignments.Holyone[1] = T.BUFF_KINGS
+	local after = T.SnapshotOwnAssignments()
+	T.ReportAssignmentChanges("Holyone", before, after)
+
+	assertEquals(#messages, 0, "local changes should stay quiet")
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+end)
+
+test("assignment alert hook reports after PallyPower accepts incoming assignments", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+		assignmentAlertsHooked = PPA.assignmentAlertsHooked,
+	}
+	local messages = {}
+
+	PPA.assignmentAlertsHooked = false
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.PallyPower_Assignments = {Holyone = {[1] = 0}}
+	_G.PallyPower_NormalAssignments = {Holyone = {}}
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+	_G.PallyPower = {
+		player = "Holyone",
+		ParseMessage = function(_, _, message)
+			if message == "ASSIGN Holyone 1 3" then
+				_G.PallyPower_Assignments.Holyone[1] = T.BUFF_KINGS
+			end
+		end,
+	}
+
+	PPA:HookAssignmentAlerts()
+	_G.PallyPower:ParseMessage("Leadadin", "ASSIGN Holyone 1 3")
+
+	assertEquals(
+		messages[1],
+		"|cff33ff99PPA|r: Leadadin has assigned you to Blessing of Kings all Warriors.",
+		"hooked ParseMessage assignment alert"
+	)
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+	PPA.assignmentAlertsHooked = old.assignmentAlertsHooked
+end)
+
 local failures = 0
 for _, entry in ipairs(tests) do
 	local ok, err = pcall(entry.fn)

@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-14
+
+### Added
+- Alert the local paladin when another paladin changes their class-wide or single-target blessing assignments.
+- Add CurseForge project metadata for project `1543077`.
+- Add the project icon asset and README presentation.
+
 ## [0.1.1] - 2026-05-14
 
 ### Fixed

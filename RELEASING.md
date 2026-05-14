@@ -18,8 +18,8 @@ Before automated release can work end-to-end, configure:
 2. GitHub Actions secret `CF_API_KEY`
    - CurseForge API token used by `BigWigsMods/packager`
 3. CurseForge project metadata in addon TOC
-   - Add `## X-Curse-Project-ID: <your_project_id>` to `PallyPowerAdvanced.toc` once the project exists
-   - This is intentionally not set yet; packager can still build archives, but cannot upload to CurseForge without it
+   - `## X-Curse-Project-ID: 1543077`
+   - Project page: `https://www.curseforge.com/wow/addons/pallypoweradvanced`
 
 ## Release Process
 
@@ -37,8 +37,8 @@ Before automated release can work end-to-end, configure:
 ### Troubleshooting
 
 - No new tag created:
-  - Check `## Version:` in `PallyPowerAdvanced.toc` is bumped, for example `0.1.1`
-  - If tag already exists, for example `v0.1.1`, workflow will skip by design
+  - Check `## Version:` in `PallyPowerAdvanced.toc` is bumped, for example `0.1.2`
+  - If tag already exists, for example `v0.1.2`, workflow will skip by design
 - Tag created but no CurseForge upload:
   - Confirm `CF_API_KEY` exists in repo secrets
   - Confirm `## X-Curse-Project-ID:` is set to a valid numeric project ID

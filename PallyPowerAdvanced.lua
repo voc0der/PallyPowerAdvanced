@@ -39,6 +39,18 @@ local CLASS_NAMES = {
 	[9] = "Shaman",
 }
 
+local CLASS_PLURAL_NAMES = {
+	[1] = "Warriors",
+	[2] = "Rogues",
+	[3] = "Priests",
+	[4] = "Druids",
+	[5] = "Paladins",
+	[6] = "Hunters",
+	[7] = "Mages",
+	[8] = "Warlocks",
+	[9] = "Shamans",
+}
+
 local BUFF_NAMES = {
 	[BUFF_WISDOM] = "Wisdom",
 	[BUFF_MIGHT] = "Might",
@@ -171,6 +183,10 @@ end
 
 local function ClassText(classID)
 	return CLASS_NAMES[classID] or ("Class " .. tostring(classID))
+end
+
+local function ClassPluralText(classID)
+	return CLASS_PLURAL_NAMES[classID] or (ClassText(classID) .. "s")
 end
 
 local function Print(message)
@@ -717,6 +733,189 @@ local function RemoveRealmName(name)
 	end
 	local shortName = name and string.match(name, "^([^-]+)")
 	return shortName or name
+end
+
+function PPA:GetLocalPaladinName()
+	local name = _G.PallyPower and _G.PallyPower.player
+	if not name and _G.UnitName then
+		name = _G.UnitName("player")
+	end
+	return RemoveRealmName(name)
+end
+
+function PPA:GetMaxClasses()
+	return SafeNumber(_G.PALLYPOWER_MAXCLASSES, #DEFAULT_CLASS_ORDER)
+end
+
+function PPA:IsAssignmentAlertMessage(message)
+	return type(message) == "string" and (
+		string.find(message, "^ASSIGN")
+		or string.find(message, "^PASSIGN")
+		or string.find(message, "^MASSIGN")
+		or string.find(message, "^NASSIGN")
+		or string.find(message, "^CLEAR")
+	)
+end
+
+function PPA:SnapshotOwnAssignments()
+	local playerName = self:GetLocalPaladinName()
+	if not playerName then
+		return nil
+	end
+
+	local snapshot = {
+		greater = {},
+		normal = {},
+	}
+
+	local assignments = _G.PallyPower_Assignments and _G.PallyPower_Assignments[playerName]
+	for classID = 1, self:GetMaxClasses() do
+		snapshot.greater[classID] = SafeNumber(assignments and assignments[classID], 0)
+	end
+
+	local normalAssignments = _G.PallyPower_NormalAssignments and _G.PallyPower_NormalAssignments[playerName]
+	if type(normalAssignments) == "table" then
+		for classID, targets in pairs(normalAssignments) do
+			local numericClassID = SafeNumber(classID, classID)
+			if type(targets) == "table" then
+				snapshot.normal[numericClassID] = {}
+				for targetName, buff in pairs(targets) do
+					snapshot.normal[numericClassID][targetName] = SafeNumber(buff, 0)
+				end
+			end
+		end
+	end
+
+	return snapshot
+end
+
+local function AddNormalTargetKeys(keys, assignments)
+	for classID, targets in pairs(assignments or {}) do
+		if type(targets) == "table" then
+			if not keys[classID] then
+				keys[classID] = {}
+			end
+			for targetName in pairs(targets) do
+				keys[classID][targetName] = true
+			end
+		end
+	end
+end
+
+function PPA:DescribeAssignmentChange(sender, change)
+	local source = RemoveRealmName(sender) or "Someone"
+	if change.kind == "greater" then
+		if change.buff and change.buff > 0 then
+			return string.format(
+				"%s has assigned you to %s all %s.",
+				source,
+				LongBuffText(change.buff),
+				ClassPluralText(change.classID)
+			)
+		end
+		return string.format(
+			"%s has cleared your assignment for all %s.",
+			source,
+			ClassPluralText(change.classID)
+		)
+	end
+
+	if change.kind == "normal" then
+		if change.buff and change.buff > 0 then
+			return string.format(
+				"%s has assigned you to single buff %s to %s.",
+				source,
+				LongBuffText(change.buff),
+				change.targetName
+			)
+		end
+		return string.format(
+			"%s has cleared your single buff assignment to %s.",
+			source,
+			change.targetName
+		)
+	end
+
+	return nil
+end
+
+function PPA:CollectAssignmentChanges(before, after)
+	local changes = {}
+	if not before or not after then
+		return changes
+	end
+
+	for classID = 1, self:GetMaxClasses() do
+		local oldBuff = SafeNumber(before.greater and before.greater[classID], 0)
+		local newBuff = SafeNumber(after.greater and after.greater[classID], 0)
+		if oldBuff ~= newBuff then
+			changes[#changes + 1] = {
+				kind = "greater",
+				classID = classID,
+				buff = newBuff,
+			}
+		end
+	end
+
+	local targetKeys = {}
+	AddNormalTargetKeys(targetKeys, before.normal)
+	AddNormalTargetKeys(targetKeys, after.normal)
+	for classID, targets in pairs(targetKeys) do
+		for targetName in pairs(targets) do
+			local oldBuff = SafeNumber(before.normal[classID] and before.normal[classID][targetName], 0)
+			local newBuff = SafeNumber(after.normal[classID] and after.normal[classID][targetName], 0)
+			if oldBuff ~= newBuff then
+				changes[#changes + 1] = {
+					kind = "normal",
+					classID = classID,
+					targetName = targetName,
+					buff = newBuff,
+				}
+			end
+		end
+	end
+
+	return changes
+end
+
+function PPA:ReportAssignmentChanges(sender, before, after)
+	local source = RemoveRealmName(sender)
+	local playerName = self:GetLocalPaladinName()
+	if not source or source == playerName then
+		return
+	end
+
+	local changes = self:CollectAssignmentChanges(before, after)
+	for _, change in ipairs(changes) do
+		local message = self:DescribeAssignmentChange(source, change)
+		if message then
+			Print(message)
+		end
+	end
+end
+
+function PPA:HookAssignmentAlerts()
+	if self.assignmentAlertsHooked or not _G.PallyPower or type(_G.PallyPower.ParseMessage) ~= "function" then
+		return
+	end
+
+	local originalParseMessage = _G.PallyPower.ParseMessage
+	_G.PallyPower.ParseMessage = function(pallyPower, sender, message, ...)
+		local before
+		if PPA:IsAssignmentAlertMessage(message) then
+			before = PPA:SnapshotOwnAssignments()
+		end
+
+		local result = originalParseMessage(pallyPower, sender, message, ...)
+
+		if before then
+			PPA:ReportAssignmentChanges(sender, before, PPA:SnapshotOwnAssignments())
+		end
+
+		return result
+	end
+
+	self.assignmentAlertsHooked = true
 end
 
 function PPA:BuildPaladinSkills(name)
@@ -1372,7 +1571,11 @@ function PPA:ReflowButtons()
 end
 
 function PPA:HookPallyPower()
-	if self.hookedPallyPower or not _G.PallyPower then
+	if not _G.PallyPower then
+		return
+	end
+	self:HookAssignmentAlerts()
+	if self.hookedPallyPower then
 		return
 	end
 	self.hookedPallyPower = true
@@ -1481,8 +1684,20 @@ PPA._test = {
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)
 	end,
+	CollectAssignmentChanges = function(before, after)
+		return PPA:CollectAssignmentChanges(before, after)
+	end,
+	DescribeAssignmentChange = function(sender, change)
+		return PPA:DescribeAssignmentChange(sender, change)
+	end,
+	ReportAssignmentChanges = function(sender, before, after)
+		return PPA:ReportAssignmentChanges(sender, before, after)
+	end,
 	RepairPallyPowerCooldownInfo = function(name)
 		return PPA:RepairPallyPowerCooldownInfo(name)
+	end,
+	SnapshotOwnAssignments = function()
+		return PPA:SnapshotOwnAssignments()
 	end,
 }
 
