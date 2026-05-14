@@ -38,17 +38,28 @@ local function baseContext()
 					[T.BUFF_SALVATION] = skill(1, 0),
 					[T.BUFF_LIGHT] = skill(4, 0),
 				},
+				auras = {
+					[T.AURA_DEVOTION] = skill(7, 2),
+					[T.AURA_RETRIBUTION] = skill(5, 0),
+					[T.AURA_CONCENTRATION] = skill(1, 0),
+				},
 			},
 			{
 				name = "Tankadin",
 				role = "TANK",
 				hasAddon = true,
 				skills = {
+					[T.BUFF_WISDOM] = skill(7, 0),
 					[T.BUFF_MIGHT] = skill(7, 0),
 					[T.BUFF_KINGS] = skill(1, 0),
 					[T.BUFF_SALVATION] = skill(1, 0),
 					[T.BUFF_LIGHT] = skill(4, 0),
 					[T.BUFF_SANCTUARY] = skill(5, 2),
+				},
+				auras = {
+					[T.AURA_DEVOTION] = skill(7, 0),
+					[T.AURA_RETRIBUTION] = skill(5, 0),
+					[T.AURA_CONCENTRATION] = skill(1, 0),
 				},
 			},
 		},
@@ -147,6 +158,40 @@ test("missing warlock class still receives assumed class-wide assignments", func
 	assertEquals(plan.assignments.Holyone[8], T.BUFF_SALVATION, "assumed warlocks should get salvation")
 	assertEquals(plan.assignments.Tankadin[8], T.BUFF_KINGS, "assumed warlocks should get kings")
 	assertEquals(plan.normalAssignments.Tankadin and plan.normalAssignments.Tankadin[8], nil, "assumed classes should not create single-target overrides")
+end)
+
+test("two paladin tank healer class assignment chooses kings and wisdom", function()
+	local context = baseContext()
+	context.players = {
+		{name = "Holyone", class = "PALADIN", classID = 5, role = "HEALER"},
+		{name = "Tankadin", class = "PALADIN", classID = 5, role = "TANK"},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	local buffs = {
+		[plan.assignments.Holyone[5]] = true,
+		[plan.assignments.Tankadin[5]] = true,
+	}
+	assertEquals(buffs[T.BUFF_KINGS], true, "paladin class should get kings")
+	assertEquals(buffs[T.BUFF_WISDOM], true, "paladin class should get wisdom")
+	assertEquals(buffs[T.BUFF_SALVATION], nil, "paladin tank/healer pair should not spend a slot on salvation")
+end)
+
+test("aura assignment gives improved devotion paladin devo first", function()
+	local context = baseContext()
+	context.players = {
+		{name = "Holyone", class = "PALADIN", classID = 5, role = "HEALER"},
+		{name = "Tankadin", class = "PALADIN", classID = 5, role = "TANK"},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.auraAssignments.Holyone, T.AURA_DEVOTION, "improved devotion paladin should get devo")
+	assertEquals(plan.auraAssignments.Tankadin, T.AURA_RETRIBUTION, "next aura should follow devo > ret > concentration")
+end)
+
+test("paladin role can be inferred from improved blessing talents", function()
+	assertEquals(T.InferPaladinRoleFromSkills({[T.BUFF_SANCTUARY] = skill(5, 2)}), "TANK", "improved sanctuary implies tank")
+	assertEquals(T.InferPaladinRoleFromSkills({[T.BUFF_WISDOM] = skill(7, 2)}), "HEALER", "improved wisdom implies healer")
 end)
 
 test("runtime context refresh repairs PallyPower cooldown tables after ScanSpells", function()

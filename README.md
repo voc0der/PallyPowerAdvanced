@@ -6,11 +6,12 @@
 
 - Adds Smart-Assign blessing planning to PallyPower
 - Handles class-wide greater blessings and per-player normal blessing overrides
+- Assigns paladin auras by subgroup
 - Prompts for uncertain hybrid role/spec cases instead of silently guessing
 - Alerts you when another paladin changes your assignments
 - Plays a one-minute warning sound when one of your assigned blessings is about to expire
 
-Current version: `0.1.3`
+Current version: `0.1.4`
 
 ## Smart Assign
 
@@ -21,6 +22,12 @@ Current version: `0.1.3`
 - Prompts before guessing uncertain role/spec cases, including damage druids and shamans
 - Prints local instructions for paladins in the group who do not have PallyPower enabled
 - Provides `/ppa debug` for local reasoning output
+
+## Aura Assign
+
+- Prefers improved Devotion Aura when a paladin has it
+- Otherwise fills auras in order: Devotion, Retribution, Concentration
+- Assigns auras per subgroup
 
 ## Assignment Alerts
 

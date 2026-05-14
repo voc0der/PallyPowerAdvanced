@@ -10,6 +10,10 @@ local BUFF_SALVATION = 4
 local BUFF_LIGHT = 5
 local BUFF_SANCTUARY = 6
 
+local AURA_DEVOTION = 1
+local AURA_RETRIBUTION = 2
+local AURA_CONCENTRATION = 3
+
 local BUFF_WARNING_SECONDS = 60
 local BUFF_WARNING_SCAN_INTERVAL = 10
 local BUFF_WARNING_SOUND_COOLDOWN = 30
@@ -87,6 +91,12 @@ local LONG_BUFF_NAMES = {
 	[BUFF_SANCTUARY] = "Blessing of Sanctuary",
 }
 
+local AURA_NAMES = {
+	[AURA_DEVOTION] = "Devotion Aura",
+	[AURA_RETRIBUTION] = "Retribution Aura",
+	[AURA_CONCENTRATION] = "Concentration Aura",
+}
+
 local ROLE_LABELS = {
 	TANK = "Tank",
 	HEALER = "Healer",
@@ -104,6 +114,12 @@ local DEFAULT_CLASS_ORDER = {
 	CLASS_ID.MAGE,
 	CLASS_ID.WARLOCK,
 	CLASS_ID.SHAMAN,
+}
+
+local AURA_PRIORITY = {
+	AURA_DEVOTION,
+	AURA_RETRIBUTION,
+	AURA_CONCENTRATION,
 }
 
 local GENERAL_TIE_ORDER = {
@@ -209,6 +225,10 @@ end
 
 local function LongBuffText(buff)
 	return LONG_BUFF_NAMES[buff] or BuffText(buff)
+end
+
+local function AuraText(aura)
+	return AURA_NAMES[aura] or ("Aura " .. tostring(aura))
 end
 
 local function ClassText(classID)
@@ -425,17 +445,41 @@ local function SkillForBuff(paladin, buff)
 	return paladin.skills[buff]
 end
 
+local function SkillRank(skill)
+	if type(skill) == "table" then
+		return SafeNumber(skill.rank, 0)
+	end
+	return skill == true and 1 or 0
+end
+
+local function SkillTalent(skill)
+	if type(skill) == "table" then
+		return SafeNumber(skill.talent, 0)
+	end
+	return 0
+end
+
+function PPA:InferPaladinRoleFromSkills(skills)
+	if type(skills) ~= "table" then
+		return nil
+	end
+
+	if SkillTalent(skills[BUFF_SANCTUARY]) > 0 then
+		return ROLE_TANK
+	end
+	if SkillTalent(skills[BUFF_WISDOM]) > 0 then
+		return ROLE_HEALER
+	end
+	return nil
+end
+
 function PPA:CanPaladinBuff(paladin, buff)
 	if not paladin or buff == nil or buff <= 0 or buff > BUFF_SANCTUARY then
 		return false
 	end
 
 	if paladin.hasAddon then
-		local skill = SkillForBuff(paladin, buff)
-		if type(skill) == "table" then
-			return SafeNumber(skill.rank, 0) > 0
-		end
-		return skill == true
+		return SkillRank(SkillForBuff(paladin, buff)) > 0
 	end
 
 	local role = NormalizeRole(paladin.role)
@@ -528,14 +572,18 @@ local function EnsureClassAssignment(assignments, paladinName)
 	return assignments[paladinName]
 end
 
+local function EnsureManualAssignment(plan, paladin)
+	if not plan.manualAssignments[paladin.name] then
+		plan.manualAssignments[paladin.name] = {greater = {}, normal = {}, role = paladin.role}
+	end
+	return plan.manualAssignments[paladin.name]
+end
+
 local function SetPlanAssignment(plan, paladin, classID, buff)
 	if paladin.hasAddon then
 		EnsureClassAssignment(plan.assignments, paladin.name)[classID] = buff
 	else
-		if not plan.manualAssignments[paladin.name] then
-			plan.manualAssignments[paladin.name] = {greater = {}, normal = {}, role = paladin.role}
-		end
-		plan.manualAssignments[paladin.name].greater[classID] = buff
+		EnsureManualAssignment(plan, paladin).greater[classID] = buff
 	end
 end
 
@@ -549,10 +597,7 @@ local function SetPlanNormal(plan, paladin, classID, targetName, buff, replaced)
 		end
 		plan.normalAssignments[paladin.name][classID][targetName] = buff
 	else
-		if not plan.manualAssignments[paladin.name] then
-			plan.manualAssignments[paladin.name] = {greater = {}, normal = {}, role = paladin.role}
-		end
-		local manual = plan.manualAssignments[paladin.name].normal
+		local manual = EnsureManualAssignment(plan, paladin).normal
 		manual[#manual + 1] = {
 			classID = classID,
 			targetName = targetName,
@@ -624,6 +669,20 @@ end
 
 function PPA:SelectClassAssignments(context, classID, members, plan)
 	local scores = self:ScoreClassBuffs(members, context)
+	if classID == CLASS_ID.PALADIN and (context and context.pallyCount or 0) <= 2 then
+		local hasTank, hasHealer = false, false
+		for _, unit in ipairs(members or {}) do
+			local role = NormalizeRole(unit.role)
+			if role == ROLE_TANK then
+				hasTank = true
+			elseif role == ROLE_HEALER then
+				hasHealer = true
+			end
+		end
+		if hasTank and hasHealer then
+			scores[BUFF_WISDOM] = (scores[BUFF_WISDOM] or 0) + 25
+		end
+	end
 	local scoredBuffs = SortedScoredBuffs(scores)
 	local usedPaladins = {}
 	local selected = {}
@@ -687,10 +746,100 @@ function PPA:ApplyPlayerOverrides(context, classID, members, selected, plan)
 	end
 end
 
+local function AuraSkillForPaladin(paladin, aura)
+	if type(paladin.auras) ~= "table" then
+		return nil
+	end
+	return paladin.auras[aura]
+end
+
+function PPA:CanPaladinUseAura(paladin, aura)
+	if not paladin or not aura or aura < AURA_DEVOTION or aura > AURA_CONCENTRATION then
+		return false
+	end
+	if paladin.hasAddon then
+		return SkillRank(AuraSkillForPaladin(paladin, aura)) > 0
+	end
+	return true
+end
+
+function PPA:ScorePaladinForAura(paladin, aura)
+	if paladin.hasAddon then
+		local skill = AuraSkillForPaladin(paladin, aura)
+		local rank = SkillRank(skill)
+		local talent = SkillTalent(skill)
+		if aura == AURA_DEVOTION then
+			return talent * 100 + rank * 10
+		end
+		return rank * 10 + talent
+	end
+
+	local role = NormalizeRole(paladin.role)
+	if aura == AURA_DEVOTION then
+		return 10 + (role == ROLE_TANK and 4 or 0)
+	elseif aura == AURA_RETRIBUTION then
+		return 8 + (role == ROLE_DAMAGER and 4 or 0)
+	elseif aura == AURA_CONCENTRATION then
+		return 6 + (role == ROLE_HEALER and 4 or 0)
+	end
+	return 0
+end
+
+function PPA:SelectPaladinForAura(paladins, aura, usedPaladins)
+	local bestPaladin
+	local bestScore = -100000
+	for _, paladin in ipairs(paladins or {}) do
+		if not usedPaladins[paladin.name] and self:CanPaladinUseAura(paladin, aura) then
+			local score = self:ScorePaladinForAura(paladin, aura)
+			if score > bestScore or (score == bestScore and paladin.name < (bestPaladin and bestPaladin.name or "\255")) then
+				bestScore = score
+				bestPaladin = paladin
+			end
+		end
+	end
+	return bestPaladin, bestScore
+end
+
+function PPA:BuildAuraAssignments(context, plan)
+	local subgroups = {}
+	for _, paladin in ipairs(context.paladins or {}) do
+		local subgroup = paladin.subgroup or 1
+		if not subgroups[subgroup] then
+			subgroups[subgroup] = {}
+		end
+		subgroups[subgroup][#subgroups[subgroup] + 1] = paladin
+		if paladin.hasAddon then
+			plan.auraAssignments[paladin.name] = 0
+		end
+	end
+
+	for subgroup, paladins in pairs(subgroups) do
+		local usedPaladins = {}
+		for _, aura in ipairs(AURA_PRIORITY) do
+			local paladin = self:SelectPaladinForAura(paladins, aura, usedPaladins)
+			if paladin then
+				usedPaladins[paladin.name] = true
+				if paladin.hasAddon then
+					plan.auraAssignments[paladin.name] = aura
+				else
+					EnsureManualAssignment(plan, paladin).aura = aura
+				end
+				plan.debugLines[#plan.debugLines + 1] = string.format(
+					"Group %s aura: %s -> %s.",
+					tostring(subgroup),
+					AuraText(aura),
+					paladin.name
+				)
+			end
+		end
+	end
+end
+
 function PPA:BuildSmartPlan(context)
 	local plan = {
 		assignments = {},
 		normalAssignments = {},
+		auraAssignments = {},
 		manualAssignments = {},
 		classPlans = {},
 		debugLines = {},
@@ -754,6 +903,8 @@ function PPA:BuildSmartPlan(context)
 			end
 		end
 	end
+
+	self:BuildAuraAssignments(context, plan)
 
 	return plan
 end
@@ -1202,6 +1353,26 @@ function PPA:BuildPaladinSkills(name)
 	return skills
 end
 
+function PPA:BuildPaladinAuras(name)
+	local auras = {}
+	local allPallys = _G.AllPallys
+	local info = allPallys and allPallys[name]
+	local auraInfo = type(info) == "table" and info.AuraInfo
+	if type(auraInfo) ~= "table" then
+		return auras
+	end
+
+	for aura = AURA_DEVOTION, AURA_CONCENTRATION do
+		if type(auraInfo[aura]) == "table" then
+			auras[aura] = {
+				rank = SafeNumber(auraInfo[aura].rank, 0),
+				talent = SafeNumber(auraInfo[aura].talent, 0),
+			}
+		end
+	end
+	return auras
+end
+
 function PPA:GetClassID(classFile)
 	if _G.PallyPower and _G.PallyPower.ClassToID and _G.PallyPower.ClassToID[classFile] then
 		return _G.PallyPower.ClassToID[classFile]
@@ -1334,16 +1505,24 @@ function PPA:BuildRuntimeContext(guess)
 	for _, unit in ipairs(players) do
 		if unit.class == "PALADIN" then
 			local hasAddon = type(_G.AllPallys) == "table" and type(_G.AllPallys[unit.name]) == "table"
+			local skills = hasAddon and self:BuildPaladinSkills(unit.name) or {}
+			local role = unit.role
+			if NormalizeRole(role) == ROLE_NONE then
+				role = self:InferPaladinRoleFromSkills(skills) or role
+				unit.role = role
+			end
 			paladins[#paladins + 1] = {
 				name = unit.name,
 				fullName = unit.fullName,
 				key = unit.key,
 				class = "PALADIN",
 				classID = CLASS_ID.PALADIN,
-				role = unit.role,
+				role = role,
 				spec = unit.spec,
+				subgroup = unit.subgroup,
 				hasAddon = hasAddon,
-				skills = hasAddon and self:BuildPaladinSkills(unit.name) or {},
+				skills = skills,
+				auras = hasAddon and self:BuildPaladinAuras(unit.name) or {},
 			}
 		end
 	end
@@ -1402,6 +1581,13 @@ local function EnsurePallyPowerNormalTable(name, classID)
 	return _G.PallyPower_NormalAssignments[name][classID]
 end
 
+local function EnsurePallyPowerAuraAssignments()
+	if type(_G.PallyPower_AuraAssignments) ~= "table" then
+		_G.PallyPower_AuraAssignments = {}
+	end
+	return _G.PallyPower_AuraAssignments
+end
+
 function PPA:AssignmentString(assignments)
 	local maxClasses = _G.PALLYPOWER_MAXCLASSES or 9
 	local parts = {}
@@ -1435,6 +1621,10 @@ function PPA:SendPlanMessages(plan)
 	end
 	for offset = 1, #normalList, 5 do
 		_G.PallyPower:SendMessage("NASSIGN " .. table.concat(normalList, "@", offset, math.min(offset + 4, #normalList)))
+	end
+
+	for paladinName, aura in pairs(plan.auraAssignments or {}) do
+		_G.PallyPower:SendMessage("AASSIGN " .. paladinName .. " " .. SafeNumber(aura, 0))
 	end
 end
 
@@ -1476,6 +1666,13 @@ function PPA:ApplyPlan(plan, context)
 		end
 	end
 
+	local auraAssignments = EnsurePallyPowerAuraAssignments()
+	for _, paladin in ipairs(context.paladins or {}) do
+		if paladin.hasAddon then
+			auraAssignments[paladin.name] = SafeNumber(plan.auraAssignments and plan.auraAssignments[paladin.name], 0)
+		end
+	end
+
 	local function afterAssignments()
 		self:SendPlanMessages(plan)
 		if _G.PallyPower.UpdateRoster then
@@ -1507,6 +1704,9 @@ function PPA:PrintManualAssignments(plan)
 		end
 		for _, normal in ipairs(manual.normal or {}) do
 			Print("Ask " .. paladinName .. " to single-buff " .. normal.targetName .. " with " .. LongBuffText(normal.buff) .. " instead of " .. BuffText(normal.replaced) .. ".")
+		end
+		if manual.aura then
+			Print("Ask " .. paladinName .. " to use " .. AuraText(manual.aura) .. ".")
 		end
 	end
 end
@@ -1946,6 +2146,9 @@ PPA._test = {
 	BUFF_SALVATION = BUFF_SALVATION,
 	BUFF_LIGHT = BUFF_LIGHT,
 	BUFF_SANCTUARY = BUFF_SANCTUARY,
+	AURA_DEVOTION = AURA_DEVOTION,
+	AURA_RETRIBUTION = AURA_RETRIBUTION,
+	AURA_CONCENTRATION = AURA_CONCENTRATION,
 	BuildSmartPlan = function(context)
 		return PPA:BuildSmartPlan(context)
 	end,
@@ -1954,6 +2157,9 @@ PPA._test = {
 	end,
 	GetPriorityForUnit = function(unit, context)
 		return PPA:GetPriorityForUnit(unit, context)
+	end,
+	InferPaladinRoleFromSkills = function(skills)
+		return PPA:InferPaladinRoleFromSkills(skills)
 	end,
 	FindExpiringAssignedBuffs = function(threshold)
 		return PPA:FindExpiringAssignedBuffs(threshold)

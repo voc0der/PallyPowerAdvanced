@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.1.4] - 2026-05-14
+
+### Added
+- Smart-Assign now assigns paladin auras by subgroup, preferring improved Devotion Aura, then Retribution Aura, then Concentration Aura.
+- Infer unmarked paladin healer/tank roles from improved Wisdom and improved Sanctuary talents when PallyPower skill data is available.
+
+### Fixed
+- Two-paladin tank/healer groups now prefer Kings plus Wisdom for paladin blessings instead of spending a slot on Salvation.
+
 ## [0.1.3] - 2026-05-14
 
 ### Added
