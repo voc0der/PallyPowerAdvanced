@@ -19,6 +19,8 @@ local BUFF_WARNING_SCAN_INTERVAL = 10
 local BUFF_WARNING_SOUND_COOLDOWN = 30
 local BUFF_WARNING_RESTORE_DELAY = 2
 local BUFF_WARNING_SOUND_CHANNEL = "Master"
+local BUFF_WARNING_SOUNDKIT = "UI_PROFESSIONS_NEW_RECIPE_LEARNED_TOAST"
+local BUFF_WARNING_SOUNDKIT_FALLBACK = "IG_MAINMENU_OPTION_CHECKBOX_ON"
 
 local ROLE_TANK = "TANK"
 local ROLE_HEALER = "HEALER"
@@ -1285,7 +1287,7 @@ function PPA:RestoreSoundCVars(previous)
 end
 
 function PPA:PlayBuffWarningSound()
-	local soundKit = _G.SOUNDKIT and _G.SOUNDKIT.READY_CHECK
+	local soundKit = _G.SOUNDKIT and (_G.SOUNDKIT[BUFF_WARNING_SOUNDKIT] or _G.SOUNDKIT[BUFF_WARNING_SOUNDKIT_FALLBACK])
 	if not soundKit or type(_G.PlaySound) ~= "function" then
 		return false
 	end

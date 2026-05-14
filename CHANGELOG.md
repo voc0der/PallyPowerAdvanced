@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-14
+
+### Changed
+- Swapped the one-minute blessing warning from the Ready Check sound to a softer chime-style toast sound.
+
 ## [0.1.5] - 2026-05-14
 
 ### Fixed

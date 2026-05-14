@@ -475,7 +475,10 @@ test("buff warning sound temporarily unmutes and restores audio cvars", function
 	}
 	local playedSound, playedChannel
 
-	_G.SOUNDKIT = {READY_CHECK = 12345}
+	_G.SOUNDKIT = {
+		READY_CHECK = 12345,
+		UI_PROFESSIONS_NEW_RECIPE_LEARNED_TOAST = 67890,
+	}
 	_G.GetCVar = function(name)
 		return cvars[name]
 	end
@@ -500,7 +503,7 @@ test("buff warning sound temporarily unmutes and restores audio cvars", function
 
 	assertEquals(T.IsGameSoundMuted(), true, "sound should start muted")
 	assertEquals(T.PlayBuffWarningSound(), true, "sound playback should be attempted")
-	assertEquals(playedSound, 12345, "ready check sound should play")
+	assertEquals(playedSound, 67890, "chime-style warning sound should play")
 	assertEquals(playedChannel, "Master", "warning should use master channel")
 	assertEquals(cvars.Sound_EnableAllSound, "0", "all sound should be restored")
 	assertEquals(cvars.Sound_EnableSFX, "0", "sfx should be restored")
