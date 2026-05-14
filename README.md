@@ -4,7 +4,7 @@ Smart blessing assignment for PallyPower on WoW TBC Anniversary Classic.
 
 PallyPowerAdvanced adds a `Smart-Assign` button to PallyPower's blessing assignment panel. It uses Blizzard group roles, PallyPower's known paladin skill data, and explicit role/spec choices for uncertain hybrid players to build class-wide greater blessing assignments plus per-player normal blessing overrides.
 
-Current version: `0.1.0`
+Current version: `0.1.1`
 
 ## What It Does
 

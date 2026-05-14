@@ -744,6 +744,47 @@ function PPA:GetClassID(classFile)
 	return CLASS_ID[classFile]
 end
 
+function PPA:RepairPallyPowerCooldownInfo(name)
+	local allPallys = _G.AllPallys
+	local info = allPallys and name and allPallys[name]
+	if type(info) ~= "table" or type(info.CooldownInfo) ~= "table" then
+		return
+	end
+
+	for id = 1, 2 do
+		local cooldown = info.CooldownInfo[id]
+		if type(cooldown) == "table" then
+			if cooldown.start == nil then
+				cooldown.start = 0
+			end
+			if cooldown.duration == nil then
+				cooldown.duration = 0
+			end
+		end
+	end
+end
+
+function PPA:RefreshPallyPowerState()
+	if not _G.PallyPower then
+		return
+	end
+
+	if _G.PallyPower.ScanSpells then
+		pcall(_G.PallyPower.ScanSpells, _G.PallyPower)
+	end
+	if _G.PallyPower.ScanCooldowns then
+		pcall(_G.PallyPower.ScanCooldowns, _G.PallyPower)
+	end
+	if _G.PallyPower.ScanInventory then
+		pcall(_G.PallyPower.ScanInventory, _G.PallyPower)
+	end
+	self:RepairPallyPowerCooldownInfo(_G.PallyPower.player)
+
+	if _G.PallyPower.UpdateRoster then
+		pcall(_G.PallyPower.UpdateRoster, _G.PallyPower)
+	end
+end
+
 function PPA:CollectRoster()
 	local players = {}
 	local units = {}
@@ -821,14 +862,7 @@ end
 
 function PPA:BuildRuntimeContext(guess)
 	self:EnsureDB()
-	if _G.PallyPower then
-		if _G.PallyPower.ScanSpells then
-			pcall(_G.PallyPower.ScanSpells, _G.PallyPower)
-		end
-		if _G.PallyPower.UpdateRoster then
-			pcall(_G.PallyPower.UpdateRoster, _G.PallyPower)
-		end
-	end
+	self:RefreshPallyPowerState()
 
 	local players = self:CollectRoster()
 	local paladins = {}
@@ -1441,8 +1475,14 @@ PPA._test = {
 	ApplyGuess = function(unit)
 		return PPA:ApplyGuess(unit)
 	end,
+	BuildRuntimeContext = function(guess)
+		return PPA:BuildRuntimeContext(guess)
+	end,
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)
+	end,
+	RepairPallyPowerCooldownInfo = function(name)
+		return PPA:RepairPallyPowerCooldownInfo(name)
 	end,
 }
 

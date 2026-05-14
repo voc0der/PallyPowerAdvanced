@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-14
+
+### Fixed
+- Refresh PallyPower cooldown state after Smart-Assign roster scans so the blessing grid does not receive empty cooldown tables.
+
 ## [0.1.0] - 2026-05-14
 
 ### Added

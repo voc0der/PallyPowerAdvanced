@@ -136,6 +136,65 @@ test("manual no-addon paladin can receive chat-only easy salvation assignment", 
 	assertEquals(plan.assignments.Holyone[2], T.BUFF_KINGS, "addon paladin should handle kings")
 end)
 
+test("runtime context refresh repairs PallyPower cooldown tables after ScanSpells", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		AllPallys = _G.AllPallys,
+		IsInRaid = _G.IsInRaid,
+		UnitExists = _G.UnitExists,
+		MAX_PARTY_MEMBERS = _G.MAX_PARTY_MEMBERS,
+	}
+	local scanCalls, cooldownCalls, inventoryCalls, updateCalls = 0, 0, 0, 0
+
+	_G.AllPallys = {}
+	_G.IsInRaid = function()
+		return false
+	end
+	_G.UnitExists = function()
+		return false
+	end
+	_G.MAX_PARTY_MEMBERS = 0
+	_G.PallyPower = {
+		player = "Turing",
+		ScanSpells = function()
+			scanCalls = scanCalls + 1
+			_G.AllPallys.Turing = {
+				CooldownInfo = {
+					[1] = {},
+					[2] = {},
+				},
+			}
+		end,
+		ScanCooldowns = function()
+			cooldownCalls = cooldownCalls + 1
+			_G.AllPallys.Turing.CooldownInfo[1].start = 0
+			_G.AllPallys.Turing.CooldownInfo[1].duration = 0
+		end,
+		ScanInventory = function()
+			inventoryCalls = inventoryCalls + 1
+		end,
+		UpdateRoster = function()
+			updateCalls = updateCalls + 1
+		end,
+	}
+
+	T.BuildRuntimeContext(false)
+
+	assertEquals(scanCalls, 1, "ScanSpells should run")
+	assertEquals(cooldownCalls, 1, "ScanCooldowns should follow ScanSpells")
+	assertEquals(inventoryCalls, 1, "ScanInventory should run")
+	assertEquals(updateCalls, 1, "UpdateRoster should run")
+	assertEquals(_G.AllPallys.Turing.CooldownInfo[1].start, 0, "first cooldown start should be safe")
+	assertEquals(_G.AllPallys.Turing.CooldownInfo[2].start, 0, "second cooldown start should be repaired")
+	assertEquals(_G.AllPallys.Turing.CooldownInfo[2].duration, 0, "second cooldown duration should be repaired")
+
+	_G.PallyPower = old.PallyPower
+	_G.AllPallys = old.AllPallys
+	_G.IsInRaid = old.IsInRaid
+	_G.UnitExists = old.UnitExists
+	_G.MAX_PARTY_MEMBERS = old.MAX_PARTY_MEMBERS
+end)
+
 local failures = 0
 for _, entry in ipairs(tests) do
 	local ok, err = pcall(entry.fn)
