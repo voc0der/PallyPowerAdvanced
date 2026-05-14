@@ -8,14 +8,16 @@
 - Handles class-wide greater blessings and per-player normal blessing overrides
 - Prompts for uncertain hybrid role/spec cases instead of silently guessing
 - Alerts you when another paladin changes your assignments
+- Plays a one-minute warning sound when one of your assigned blessings is about to expire
 
-Current version: `0.1.2`
+Current version: `0.1.3`
 
 ## Smart Assign
 
 - Adds `Smart-Assign` beside PallyPower's existing `Auto-Assign` button
 - Prioritizes Salvation, Kings, Might, Wisdom, Light, and Sanctuary by class, role, and selected hybrid spec
 - Uses per-player normal blessings for tanks/healers who should not receive the class-wide greater blessing
+- Fills class-wide assignments for missing classes by assuming a full group
 - Prompts before guessing uncertain role/spec cases, including damage druids and shamans
 - Prints local instructions for paladins in the group who do not have PallyPower enabled
 - Provides `/ppa debug` for local reasoning output
@@ -41,6 +43,7 @@ Current version: `0.1.2`
 - `/ppa debug`: Toggle local debug reasoning
 - `/ppa debug on`: Enable debug reasoning
 - `/ppa debug off`: Disable debug reasoning
+- `/ppa sound`: Toggle the one-minute buff warning sound
 - `/ppa specs`: Reopen the manual role/spec assignment popup
 - `/ppa help`: Show command help
 

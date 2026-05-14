@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+## [0.1.3] - 2026-05-14
+
+### Added
+- Play a one-minute blessing warning sound for the local paladin's assigned buffs, including when game sound/SFX are muted.
+- Fill Smart-Assign class-wide blessings for missing classes by assuming a full group and using the same class priority logic.
+
 ## [0.1.2] - 2026-05-14
 
 ### Added

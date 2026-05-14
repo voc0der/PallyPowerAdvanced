@@ -136,6 +136,19 @@ test("manual no-addon paladin can receive chat-only easy salvation assignment", 
 	assertEquals(plan.assignments.Holyone[2], T.BUFF_KINGS, "addon paladin should handle kings")
 end)
 
+test("missing warlock class still receives assumed class-wide assignments", function()
+	local context = baseContext()
+	context.players = {
+		{name = "Sneaky", class = "ROGUE", classID = 2, role = "DAMAGER"},
+		{name = "Backstab", class = "ROGUE", classID = 2, role = "DAMAGER"},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Holyone[8], T.BUFF_SALVATION, "assumed warlocks should get salvation")
+	assertEquals(plan.assignments.Tankadin[8], T.BUFF_KINGS, "assumed warlocks should get kings")
+	assertEquals(plan.normalAssignments.Tankadin and plan.normalAssignments.Tankadin[8], nil, "assumed classes should not create single-target overrides")
+end)
+
 test("runtime context refresh repairs PallyPower cooldown tables after ScanSpells", function()
 	local old = {
 		PallyPower = _G.PallyPower,
@@ -349,6 +362,161 @@ test("assignment alert hook reports after PallyPower accepts incoming assignment
 	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
 	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
 	PPA.assignmentAlertsHooked = old.assignmentAlertsHooked
+end)
+
+test("buff warning sound temporarily unmutes and restores audio cvars", function()
+	local old = {
+		SOUNDKIT = _G.SOUNDKIT,
+		PlaySound = _G.PlaySound,
+		GetCVar = _G.GetCVar,
+		GetCVarBool = _G.GetCVarBool,
+		SetCVar = _G.SetCVar,
+		C_Timer = _G.C_Timer,
+	}
+	local cvars = {
+		Sound_EnableAllSound = "0",
+		Sound_EnableSFX = "0",
+		Sound_MasterVolume = "0",
+	}
+	local playedSound, playedChannel
+
+	_G.SOUNDKIT = {READY_CHECK = 12345}
+	_G.GetCVar = function(name)
+		return cvars[name]
+	end
+	_G.GetCVarBool = function(name)
+		return cvars[name] == "1"
+	end
+	_G.SetCVar = function(name, value)
+		cvars[name] = tostring(value)
+	end
+	_G.C_Timer = {
+		After = function(_, callback)
+			callback()
+		end,
+	}
+	_G.PlaySound = function(sound, channel)
+		playedSound = sound
+		playedChannel = channel
+		assertEquals(cvars.Sound_EnableAllSound, "1", "all sound should be enabled before alert")
+		assertEquals(cvars.Sound_EnableSFX, "1", "sfx should be enabled before alert")
+		assertEquals(cvars.Sound_MasterVolume, "0.5", "master volume should be raised before alert")
+	end
+
+	assertEquals(T.IsGameSoundMuted(), true, "sound should start muted")
+	assertEquals(T.PlayBuffWarningSound(), true, "sound playback should be attempted")
+	assertEquals(playedSound, 12345, "ready check sound should play")
+	assertEquals(playedChannel, "Master", "warning should use master channel")
+	assertEquals(cvars.Sound_EnableAllSound, "0", "all sound should be restored")
+	assertEquals(cvars.Sound_EnableSFX, "0", "sfx should be restored")
+	assertEquals(cvars.Sound_MasterVolume, "0", "master volume should be restored")
+
+	_G.SOUNDKIT = old.SOUNDKIT
+	_G.PlaySound = old.PlaySound
+	_G.GetCVar = old.GetCVar
+	_G.GetCVarBool = old.GetCVarBool
+	_G.SetCVar = old.SetCVar
+	_G.C_Timer = old.C_Timer
+end)
+
+test("buff warning sound fires once for a new expiring assigned blessing", function()
+	local old = {
+		db = PPA.db,
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
+		FindExpiringAssignedBuffs = PPA.FindExpiringAssignedBuffs,
+		PlayBuffWarningSound = PPA.PlayBuffWarningSound,
+		buffWarningState = PPA.buffWarningState,
+		lastBuffWarningSound = PPA.lastBuffWarningSound,
+	}
+	local plays = 0
+
+	_G.PallyPowerAdvancedDB = {debug = false, specs = {}, buffWarningSound = true}
+	PPA.db = nil
+	PPA.buffWarningState = nil
+	PPA.lastBuffWarningSound = nil
+	PPA.FindExpiringAssignedBuffs = function()
+		return {
+			{
+				unitName = "Billwarrior",
+				classID = 1,
+				buffID = T.BUFF_KINGS,
+				assignmentType = "normal",
+				remaining = 55,
+			},
+		}
+	end
+	PPA.PlayBuffWarningSound = function()
+		plays = plays + 1
+		return true
+	end
+
+	T.CheckBuffWarnings(100)
+	T.CheckBuffWarnings(110)
+	assertEquals(plays, 1, "same active warning should only play once")
+
+	PPA.FindExpiringAssignedBuffs = function()
+		return {}
+	end
+	T.CheckBuffWarnings(120)
+	PPA.FindExpiringAssignedBuffs = old.FindExpiringAssignedBuffs
+	PPA.FindExpiringAssignedBuffs = function()
+		return {
+			{
+				unitName = "Billwarrior",
+				classID = 1,
+				buffID = T.BUFF_KINGS,
+				assignmentType = "normal",
+				remaining = 50,
+			},
+		}
+	end
+	T.CheckBuffWarnings(131)
+	assertEquals(plays, 2, "warning should re-arm after the buff leaves and re-enters threshold")
+
+	PPA.db = old.db
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
+	PPA.FindExpiringAssignedBuffs = old.FindExpiringAssignedBuffs
+	PPA.PlayBuffWarningSound = old.PlayBuffWarningSound
+	PPA.buffWarningState = old.buffWarningState
+	PPA.lastBuffWarningSound = old.lastBuffWarningSound
+end)
+
+test("expiring assigned blessings are detected from PallyPower assignments", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		CollectRoster = PPA.CollectRoster,
+	}
+
+	_G.PallyPower = {
+		player = "Holyone",
+		Spells = {[T.BUFF_KINGS] = "Blessing of Kings"},
+		GSpells = {[T.BUFF_KINGS] = "Greater Blessing of Kings"},
+		IsBuffActive = function(_, spell, greaterSpell, unit)
+			assertEquals(spell, "Blessing of Kings", "normal spell should be checked")
+			assertEquals(greaterSpell, "Greater Blessing of Kings", "greater spell should be checked")
+			assertEquals(unit, "raid8", "unit token should be checked")
+			return 55, 600, "Greater Blessing of Kings"
+		end,
+	}
+	_G.PallyPower_Assignments = {Holyone = {[8] = T.BUFF_KINGS}}
+	_G.PallyPower_NormalAssignments = {Holyone = {}}
+	PPA.CollectRoster = function()
+		return {
+			{name = "Billwarlock", unit = "raid8", classID = 8},
+		}
+	end
+
+	local warnings = T.FindExpiringAssignedBuffs(60)
+	assertEquals(#warnings, 1, "one assigned buff should be expiring")
+	assertEquals(warnings[1].unitName, "Billwarlock", "warning target")
+	assertEquals(warnings[1].buffID, T.BUFF_KINGS, "warning buff")
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	PPA.CollectRoster = old.CollectRoster
 end)
 
 local failures = 0

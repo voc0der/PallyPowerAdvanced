@@ -10,6 +10,12 @@ local BUFF_SALVATION = 4
 local BUFF_LIGHT = 5
 local BUFF_SANCTUARY = 6
 
+local BUFF_WARNING_SECONDS = 60
+local BUFF_WARNING_SCAN_INTERVAL = 10
+local BUFF_WARNING_SOUND_COOLDOWN = 30
+local BUFF_WARNING_RESTORE_DELAY = 2
+local BUFF_WARNING_SOUND_CHANNEL = "Master"
+
 local ROLE_TANK = "TANK"
 local ROLE_HEALER = "HEALER"
 local ROLE_DAMAGER = "DAMAGER"
@@ -25,6 +31,18 @@ local CLASS_ID = {
 	MAGE = 7,
 	WARLOCK = 8,
 	SHAMAN = 9,
+}
+
+local CLASS_FILES_BY_ID = {
+	[1] = "WARRIOR",
+	[2] = "ROGUE",
+	[3] = "PRIEST",
+	[4] = "DRUID",
+	[5] = "PALADIN",
+	[6] = "HUNTER",
+	[7] = "MAGE",
+	[8] = "WARLOCK",
+	[9] = "SHAMAN",
 }
 
 local CLASS_NAMES = {
@@ -124,6 +142,18 @@ local MANUAL_CHOICES = {
 	},
 }
 
+local ASSUMED_MISSING_CLASS_UNITS = {
+	[CLASS_ID.WARRIOR] = {role = ROLE_DAMAGER},
+	[CLASS_ID.ROGUE] = {role = ROLE_DAMAGER},
+	[CLASS_ID.PRIEST] = {role = ROLE_HEALER},
+	[CLASS_ID.DRUID] = {role = ROLE_DAMAGER, spec = "FERAL"},
+	[CLASS_ID.PALADIN] = {role = ROLE_DAMAGER},
+	[CLASS_ID.HUNTER] = {role = ROLE_DAMAGER},
+	[CLASS_ID.MAGE] = {role = ROLE_DAMAGER},
+	[CLASS_ID.WARLOCK] = {role = ROLE_DAMAGER},
+	[CLASS_ID.SHAMAN] = {role = ROLE_DAMAGER, spec = "ENHANCEMENT"},
+}
+
 local function AddUnique(list, value)
 	if not value then
 		return
@@ -215,6 +245,9 @@ function PPA:EnsureDB()
 	end
 	if db.debug == nil then
 		db.debug = false
+	end
+	if db.buffWarningSound == nil then
+		db.buffWarningSound = true
 	end
 	self.db = db
 	return db
@@ -542,6 +575,23 @@ local function GroupPlayersByClass(players)
 	return groups
 end
 
+function PPA:CreateAssumedClassMember(classID)
+	local classFile = CLASS_FILES_BY_ID[classID]
+	if not classFile then
+		return nil
+	end
+
+	local defaults = ASSUMED_MISSING_CLASS_UNITS[classID] or {role = ROLE_DAMAGER}
+	return {
+		name = "Assumed" .. ClassText(classID),
+		class = classFile,
+		classID = classID,
+		role = defaults.role,
+		spec = defaults.spec,
+		assumed = true,
+	}
+end
+
 function PPA:ScoreClassBuffs(members, context)
 	local scores = {}
 	for _, unit in ipairs(members) do
@@ -662,6 +712,14 @@ function PPA:BuildSmartPlan(context)
 	local groups = GroupPlayersByClass(context.players)
 	for _, classID in ipairs(DEFAULT_CLASS_ORDER) do
 		local members = groups[classID]
+		local assumed = false
+		if not members or #members == 0 then
+			local assumedMember = self:CreateAssumedClassMember(classID)
+			if assumedMember then
+				members = {assumedMember}
+				assumed = true
+			end
+		end
 		if members and #members > 0 then
 			local selected, scored = self:SelectClassAssignments(context, classID, members, plan)
 			local classPlan = {
@@ -669,6 +727,7 @@ function PPA:BuildSmartPlan(context)
 				members = members,
 				selected = selected,
 				scored = scored,
+				assumed = assumed,
 			}
 			plan.classPlans[#plan.classPlans + 1] = classPlan
 
@@ -681,12 +740,18 @@ function PPA:BuildSmartPlan(context)
 				)
 			end
 			if #pieces > 0 then
-				plan.debugLines[#plan.debugLines + 1] = ClassText(classID) .. ": " .. table.concat(pieces, ", ")
+				local prefix = ClassText(classID) .. ": "
+				if assumed then
+					prefix = prefix .. "no players found; assumed " .. RoleText(members[1].role) .. " priorities. "
+				end
+				plan.debugLines[#plan.debugLines + 1] = prefix .. table.concat(pieces, ", ")
 			else
 				plan.debugLines[#plan.debugLines + 1] = ClassText(classID) .. ": no castable blessing assignment found."
 			end
 
-			self:ApplyPlayerOverrides(context, classID, members, selected, plan)
+			if not assumed then
+				self:ApplyPlayerOverrides(context, classID, members, selected, plan)
+			end
 		end
 	end
 
@@ -916,6 +981,207 @@ function PPA:HookAssignmentAlerts()
 	end
 
 	self.assignmentAlertsHooked = true
+end
+
+function PPA:GetAssignedBuffForUnit(unit)
+	local playerName = self:GetLocalPaladinName()
+	if not playerName or not unit or not unit.classID then
+		return nil
+	end
+
+	local normalAssignments = _G.PallyPower_NormalAssignments and _G.PallyPower_NormalAssignments[playerName]
+	local normal = normalAssignments
+		and normalAssignments[unit.classID]
+		and normalAssignments[unit.classID][unit.name]
+	normal = SafeNumber(normal, 0)
+	if normal > 0 then
+		return normal, "normal"
+	end
+
+	local assignments = _G.PallyPower_Assignments and _G.PallyPower_Assignments[playerName]
+	local greater = SafeNumber(assignments and assignments[unit.classID], 0)
+	if greater > 0 then
+		return greater, "greater"
+	end
+
+	return nil
+end
+
+function PPA:GetUnitBlessingExpiration(unit, buffID)
+	if not unit or not unit.unit or not buffID or not _G.PallyPower then
+		return nil
+	end
+
+	local spell = _G.PallyPower.Spells and _G.PallyPower.Spells[buffID]
+	local greaterSpell = _G.PallyPower.GSpells and _G.PallyPower.GSpells[buffID]
+	if not spell and not greaterSpell then
+		return nil
+	end
+
+	if type(_G.PallyPower.IsBuffActive) == "function" then
+		local ok, remaining, duration, buffName = pcall(_G.PallyPower.IsBuffActive, _G.PallyPower, spell, greaterSpell, unit.unit)
+		if ok then
+			return tonumber(remaining), tonumber(duration), buffName
+		end
+	end
+
+	return nil
+end
+
+function PPA:FindExpiringAssignedBuffs(threshold)
+	local warnings = {}
+	threshold = threshold or BUFF_WARNING_SECONDS
+
+	if not _G.PallyPower or not _G.PallyPower.Spells then
+		return warnings
+	end
+
+	for _, unit in ipairs(self:CollectRoster()) do
+		local buffID, assignmentType = self:GetAssignedBuffForUnit(unit)
+		if buffID then
+			local remaining, duration, buffName = self:GetUnitBlessingExpiration(unit, buffID)
+			if remaining and duration and duration > 0 and remaining > 0 and remaining <= threshold then
+				warnings[#warnings + 1] = {
+					unitName = unit.name,
+					unit = unit.unit,
+					classID = unit.classID,
+					buffID = buffID,
+					assignmentType = assignmentType,
+					remaining = remaining,
+					duration = duration,
+					buffName = buffName or LongBuffText(buffID),
+				}
+			end
+		end
+	end
+
+	return warnings
+end
+
+function PPA:GetBuffWarningKey(warning)
+	return table.concat({
+		tostring(warning.unitName or ""),
+		tostring(warning.classID or ""),
+		tostring(warning.buffID or ""),
+		tostring(warning.assignmentType or ""),
+	}, "|")
+end
+
+function PPA:GetCVarBool(name)
+	if type(_G.GetCVarBool) == "function" then
+		return _G.GetCVarBool(name) == true
+	end
+	if type(_G.GetCVar) == "function" then
+		local value = _G.GetCVar(name)
+		return value == true or value == 1 or value == "1"
+	end
+	return true
+end
+
+function PPA:IsGameSoundMuted()
+	local allSound = self:GetCVarBool("Sound_EnableAllSound")
+	local sfx = self:GetCVarBool("Sound_EnableSFX")
+	local masterVolume = 1
+	if type(_G.GetCVar) == "function" then
+		masterVolume = tonumber(_G.GetCVar("Sound_MasterVolume")) or 1
+	end
+	return not allSound or not sfx or masterVolume <= 0
+end
+
+function PPA:RestoreSoundCVars(previous)
+	if type(previous) ~= "table" or type(_G.SetCVar) ~= "function" then
+		return
+	end
+	for name, value in pairs(previous) do
+		_G.SetCVar(name, value)
+	end
+end
+
+function PPA:PlayBuffWarningSound()
+	local soundKit = _G.SOUNDKIT and _G.SOUNDKIT.READY_CHECK
+	if not soundKit or type(_G.PlaySound) ~= "function" then
+		return false
+	end
+
+	local previous
+	if self:IsGameSoundMuted() and type(_G.GetCVar) == "function" and type(_G.SetCVar) == "function" then
+		previous = {
+			Sound_EnableAllSound = _G.GetCVar("Sound_EnableAllSound"),
+			Sound_EnableSFX = _G.GetCVar("Sound_EnableSFX"),
+			Sound_MasterVolume = _G.GetCVar("Sound_MasterVolume"),
+		}
+		if previous.Sound_EnableAllSound == "0" then
+			_G.SetCVar("Sound_EnableAllSound", 1)
+		end
+		if previous.Sound_EnableSFX == "0" then
+			_G.SetCVar("Sound_EnableSFX", 1)
+		end
+		if (tonumber(previous.Sound_MasterVolume) or 1) <= 0 then
+			_G.SetCVar("Sound_MasterVolume", 0.5)
+		end
+	end
+
+	local ok = pcall(_G.PlaySound, soundKit, BUFF_WARNING_SOUND_CHANNEL)
+
+	if previous then
+		if _G.C_Timer and type(_G.C_Timer.After) == "function" then
+			_G.C_Timer.After(BUFF_WARNING_RESTORE_DELAY, function()
+				PPA:RestoreSoundCVars(previous)
+			end)
+		else
+			self:RestoreSoundCVars(previous)
+		end
+	end
+
+	return ok
+end
+
+function PPA:CheckBuffWarnings(now)
+	local db = self:EnsureDB()
+	if db.buffWarningSound ~= true then
+		return
+	end
+
+	now = now or ((_G.GetTime and _G.GetTime()) or (_G.time and _G.time()) or 0)
+	self.buffWarningState = self.buffWarningState or {}
+	local activeKeys = {}
+	local hasNewWarning = false
+
+	for _, warning in ipairs(self:FindExpiringAssignedBuffs(BUFF_WARNING_SECONDS)) do
+		local key = self:GetBuffWarningKey(warning)
+		activeKeys[key] = true
+		if not self.buffWarningState[key] then
+			hasNewWarning = true
+		end
+	end
+
+	for key in pairs(self.buffWarningState) do
+		if not activeKeys[key] then
+			self.buffWarningState[key] = nil
+		end
+	end
+
+	if hasNewWarning and (not self.lastBuffWarningSound or now - self.lastBuffWarningSound >= BUFF_WARNING_SOUND_COOLDOWN) then
+		if self:PlayBuffWarningSound() then
+			self.lastBuffWarningSound = now
+			for key in pairs(activeKeys) do
+				self.buffWarningState[key] = true
+			end
+		end
+	elseif not hasNewWarning then
+		for key in pairs(activeKeys) do
+			self.buffWarningState[key] = true
+		end
+	end
+end
+
+function PPA:OnUpdate(elapsed)
+	self.buffWarningElapsed = (self.buffWarningElapsed or 0) + (elapsed or 0)
+	if self.buffWarningElapsed < BUFF_WARNING_SCAN_INTERVAL then
+		return
+	end
+	self.buffWarningElapsed = 0
+	self:CheckBuffWarnings()
 end
 
 function PPA:BuildPaladinSkills(name)
@@ -1593,6 +1859,7 @@ function PPA:ShowHelp()
 	Print("/ppa debug - toggle debug reasoning")
 	Print("/ppa debug on - enable debug reasoning")
 	Print("/ppa debug off - disable debug reasoning")
+	Print("/ppa sound - toggle one-minute buff warning sound")
 	Print("/ppa specs - choose uncertain roles/specs manually")
 end
 
@@ -1610,6 +1877,16 @@ function PPA:HandleSlash(input)
 	elseif input == "debug off" then
 		self:EnsureDB().debug = false
 		Print("Debug disabled.")
+	elseif input == "sound" then
+		local db = self:EnsureDB()
+		db.buffWarningSound = not db.buffWarningSound
+		Print("Buff warning sound " .. (db.buffWarningSound and "enabled." or "disabled."))
+	elseif input == "sound on" then
+		self:EnsureDB().buffWarningSound = true
+		Print("Buff warning sound enabled.")
+	elseif input == "sound off" then
+		self:EnsureDB().buffWarningSound = false
+		Print("Buff warning sound disabled.")
 	elseif input == "specs" or input == "assign specs" then
 		local context = self:BuildRuntimeContext(false)
 		self:ShowSpecFrame(self:GetUncertainPlayers(context))
@@ -1655,6 +1932,9 @@ function PPA:Initialize()
 		eventFrame:SetScript("OnEvent", function(_, event, arg1)
 			PPA:OnEvent(event, arg1)
 		end)
+		eventFrame:SetScript("OnUpdate", function(_, elapsed)
+			PPA:OnUpdate(elapsed)
+		end)
 		self.eventFrame = eventFrame
 	end
 end
@@ -1669,8 +1949,14 @@ PPA._test = {
 	BuildSmartPlan = function(context)
 		return PPA:BuildSmartPlan(context)
 	end,
+	CheckBuffWarnings = function(now)
+		return PPA:CheckBuffWarnings(now)
+	end,
 	GetPriorityForUnit = function(unit, context)
 		return PPA:GetPriorityForUnit(unit, context)
+	end,
+	FindExpiringAssignedBuffs = function(threshold)
+		return PPA:FindExpiringAssignedBuffs(threshold)
 	end,
 	GetUncertainPlayers = function(context)
 		return PPA:GetUncertainPlayers(context)
@@ -1689,6 +1975,12 @@ PPA._test = {
 	end,
 	DescribeAssignmentChange = function(sender, change)
 		return PPA:DescribeAssignmentChange(sender, change)
+	end,
+	IsGameSoundMuted = function()
+		return PPA:IsGameSoundMuted()
+	end,
+	PlayBuffWarningSound = function()
+		return PPA:PlayBuffWarningSound()
 	end,
 	ReportAssignmentChanges = function(sender, before, after)
 		return PPA:ReportAssignmentChanges(sender, before, after)
