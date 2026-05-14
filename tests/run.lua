@@ -177,6 +177,56 @@ test("two paladin tank healer class assignment chooses kings and wisdom", functi
 	assertEquals(buffs[T.BUFF_SALVATION], nil, "paladin tank/healer pair should not spend a slot on salvation")
 end)
 
+test("tank paladin without improved wisdom gives healer priest kings", function()
+	local context = {
+		playerName = "Tankadin",
+		pallyCount = 1,
+		healingPaladinPresent = false,
+		paladins = {
+			{
+				name = "Tankadin",
+				role = "TANK",
+				hasAddon = true,
+				skills = {
+					[T.BUFF_WISDOM] = skill(7, 0),
+					[T.BUFF_KINGS] = skill(1, 0),
+				},
+			},
+		},
+		players = {
+			{name = "Prayer", class = "PRIEST", classID = 3, role = "HEALER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Tankadin[3], T.BUFF_KINGS, "unimproved wisdom tank should give healer priests kings")
+end)
+
+test("improved wisdom paladin gives healer priest wisdom", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 1,
+		healingPaladinPresent = true,
+		paladins = {
+			{
+				name = "Holyone",
+				role = "HEALER",
+				hasAddon = true,
+				skills = {
+					[T.BUFF_WISDOM] = skill(7, 2),
+					[T.BUFF_KINGS] = skill(1, 0),
+				},
+			},
+		},
+		players = {
+			{name = "Prayer", class = "PRIEST", classID = 3, role = "HEALER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Holyone[3], T.BUFF_WISDOM, "improved wisdom should stay preferred for healer priests")
+end)
+
 test("aura assignment gives improved devotion paladin devo first", function()
 	local context = baseContext()
 	context.players = {

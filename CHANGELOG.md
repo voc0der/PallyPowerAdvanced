@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-14
+
+### Fixed
+- Smart-Assign now prefers Kings over unimproved Wisdom for healer targets when no paladin has Improved Wisdom.
+
 ## [0.1.4] - 2026-05-14
 
 ### Added

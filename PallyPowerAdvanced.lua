@@ -239,6 +239,29 @@ local function ClassPluralText(classID)
 	return CLASS_PLURAL_NAMES[classID] or (ClassText(classID) .. "s")
 end
 
+local function PaladinHasImprovedWisdom(paladin)
+	if type(paladin) ~= "table" or type(paladin.skills) ~= "table" then
+		return false
+	end
+	local wisdom = paladin.skills[BUFF_WISDOM]
+	return type(wisdom) == "table" and SafeNumber(wisdom.talent, 0) > 0
+end
+
+local function ContextHasImprovedWisdom(context)
+	if type(context) ~= "table" then
+		return false
+	end
+	if context.improvedWisdomPaladinPresent ~= nil then
+		return context.improvedWisdomPaladinPresent == true
+	end
+	for _, paladin in ipairs(context.paladins or {}) do
+		if PaladinHasImprovedWisdom(paladin) then
+			return true
+		end
+	end
+	return false
+end
+
 local function Print(message)
 	if _G.DEFAULT_CHAT_FRAME and _G.DEFAULT_CHAT_FRAME.AddMessage then
 		_G.DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99PPA|r: " .. tostring(message))
@@ -379,6 +402,7 @@ end
 function PPA:GetPriorityForUnit(unit, context)
 	local role = NormalizeRole(unit.role)
 	local includeLight = context and context.healingPaladinPresent
+	local improvedWisdom = ContextHasImprovedWisdom(context)
 	local class = unit.class
 	local spec = unit.spec
 
@@ -391,6 +415,9 @@ function PPA:GetPriorityForUnit(unit, context)
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_MIGHT, BUFF_KINGS, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "PRIEST" then
 		if role == ROLE_HEALER then
+			if not improvedWisdom then
+				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
+			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 		end
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_WISDOM, BUFF_LIGHT, BUFF_SANCTUARY)
@@ -398,6 +425,9 @@ function PPA:GetPriorityForUnit(unit, context)
 		if role == ROLE_TANK then
 			return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_LIGHT, BUFF_MIGHT, BUFF_WISDOM)
 		elseif role == ROLE_HEALER then
+			if not improvedWisdom then
+				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
+			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 		elseif spec == "BALANCE" then
 			return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_WISDOM, BUFF_LIGHT, BUFF_SANCTUARY)
@@ -405,6 +435,9 @@ function PPA:GetPriorityForUnit(unit, context)
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "PALADIN" then
 		if role == ROLE_HEALER then
+			if not improvedWisdom then
+				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
+			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 		elseif role == ROLE_TANK then
 			if (context and context.pallyCount or 0) <= 2 then
@@ -419,6 +452,9 @@ function PPA:GetPriorityForUnit(unit, context)
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_WISDOM, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "SHAMAN" then
 		if role == ROLE_HEALER then
+			if not improvedWisdom then
+				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
+			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 		elseif spec == "ELEMENTAL" then
 			return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_WISDOM, BUFF_LIGHT, BUFF_SANCTUARY)
@@ -1533,6 +1569,7 @@ function PPA:BuildRuntimeContext(guess)
 		pallyCount = #paladins,
 		playerName = _G.PallyPower and _G.PallyPower.player or (_G.UnitName and _G.UnitName("player")) or "",
 		healingPaladinPresent = false,
+		improvedWisdomPaladinPresent = false,
 	}
 
 	for _, unit in ipairs(players) do
@@ -1546,6 +1583,9 @@ function PPA:BuildRuntimeContext(guess)
 		end
 		if NormalizeRole(paladin.role) == ROLE_HEALER then
 			context.healingPaladinPresent = true
+		end
+		if PaladinHasImprovedWisdom(paladin) then
+			context.improvedWisdomPaladinPresent = true
 		end
 	end
 
