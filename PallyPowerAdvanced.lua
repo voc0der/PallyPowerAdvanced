@@ -270,6 +270,14 @@ local function PaladinHasImprovedWisdom(paladin)
 	return type(wisdom) == "table" and SafeNumber(wisdom.talent, 0) > 0
 end
 
+local function PaladinHasImprovedMight(paladin)
+	if type(paladin) ~= "table" or type(paladin.skills) ~= "table" then
+		return false
+	end
+	local might = paladin.skills[BUFF_MIGHT]
+	return type(might) == "table" and SafeNumber(might.talent, 0) > 0
+end
+
 local function ContextHasImprovedWisdom(context)
 	if type(context) ~= "table" then
 		return false
@@ -590,8 +598,11 @@ function PPA:ScorePaladinForBuff(paladin, buff)
 		score = score + (role == ROLE_TANK and 20 or 0)
 	elseif buff == BUFF_MIGHT then
 		score = score + (role == ROLE_DAMAGER and 10 or 0)
+		score = score + (PaladinHasImprovedMight(paladin) and 12 or 0)
 	elseif buff == BUFF_SALVATION then
-		score = score + (role == ROLE_DAMAGER and 8 or 0)
+		if not paladin.hasAddon then
+			score = score + (role == ROLE_DAMAGER and 8 or 0)
+		end
 	elseif buff == BUFF_KINGS then
 		score = score + ((role == ROLE_TANK or role == ROLE_HEALER) and 6 or 0)
 	end
@@ -812,11 +823,11 @@ local function PlanHasNormalBuff(plan, classID, targetName, buff)
 	return false
 end
 
-function PPA:FindBestPaladinForUnassignedNormal(context, buff, usedPaladins)
+function PPA:FindBestPaladinForUnassignedNormal(context, buff)
 	local bestPaladin
 	local bestScore = -100000
 	for _, paladin in ipairs(context.paladins or {}) do
-		if not (usedPaladins and usedPaladins[paladin.name]) and self:CanPaladinBuff(paladin, buff) then
+		if self:CanPaladinBuff(paladin, buff) then
 			local score = self:ScorePaladinForBuff(paladin, buff)
 			if score > bestScore or (score == bestScore and paladin.name < (bestPaladin and bestPaladin.name or "\255")) then
 				bestScore = score
@@ -829,10 +840,8 @@ end
 
 function PPA:ApplyTankSanctuaryFallbacks(context, classID, members, selected, plan)
 	local provided = {}
-	local usedPaladins = {}
 	for _, assignment in ipairs(selected or {}) do
 		provided[assignment.buff] = assignment.paladin.name
-		usedPaladins[assignment.paladin.name] = true
 	end
 	if provided[BUFF_SANCTUARY] then
 		return
@@ -842,7 +851,7 @@ function PPA:ApplyTankSanctuaryFallbacks(context, classID, members, selected, pl
 		if NormalizeRole(unit.role) == ROLE_TANK and not PlanHasNormalBuff(plan, classID, unit.name, BUFF_SANCTUARY) then
 			local priority = unit.priority or self:GetPriorityForUnit(unit, context)
 			if PriorityIndex(priority, BUFF_SANCTUARY) then
-				local paladin = self:FindBestPaladinForUnassignedNormal(context, BUFF_SANCTUARY, usedPaladins)
+				local paladin = self:FindBestPaladinForUnassignedNormal(context, BUFF_SANCTUARY)
 				if paladin then
 					SetPlanNormal(plan, paladin, classID, unit.name, BUFF_SANCTUARY, 0)
 					plan.debugLines[#plan.debugLines + 1] = string.format(
@@ -1655,10 +1664,8 @@ function PPA:BuildSimulationPaladinSkills(role)
 		[BUFF_KINGS] = {rank = 1, talent = 0},
 		[BUFF_SALVATION] = {rank = 1, talent = 0},
 		[BUFF_LIGHT] = {rank = 4, talent = 0},
+		[BUFF_SANCTUARY] = {rank = 5, talent = role == ROLE_TANK and 2 or 0},
 	}
-	if role == ROLE_TANK then
-		skills[BUFF_SANCTUARY] = {rank = 5, talent = 2}
-	end
 	return skills
 end
 

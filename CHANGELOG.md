@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.1.10] - 2026-05-15
+
+### Changed
+- Prefer Ret paladins with Improved Might for Might assignments instead of spending them on easy Salvation coverage.
+- Let simulated Holy/Ret paladins provide non-improved Sanctuary so the fallback model can test plain Sanctuary coverage when improved Sanctuary is unavailable.
+- Allow tank Sanctuary single-target fallbacks to use the best Sanctuary paladin even when that paladin already has a class-wide assignment.
+
+### Tests
+- Add coverage for Ret paladins being preferred for Might, plain Sanctuary fallback from non-Prot paladins, and every simulated tank receiving Sanctuary coverage.
+
 ## [0.1.9] - 2026-05-15
 
 ### Changed

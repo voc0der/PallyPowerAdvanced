@@ -132,6 +132,47 @@ test("physical and caster classes leave useless filler blessings blank", functio
 	assertEquals(rogueAssignments <= 3, true, "rogues should leave extra paladin slots blank")
 end)
 
+test("improved might ret paladin is preferred for might", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 3,
+		healingPaladinPresent = true,
+		improvedWisdomPaladinPresent = true,
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 2), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4), [T.BUFF_SANCTUARY] = skill(5)}},
+			{name = "Tankadin", role = "TANK", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4), [T.BUFF_SANCTUARY] = skill(5, 2)}},
+			{name = "Retadin", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4), [T.BUFF_SANCTUARY] = skill(5)}},
+		},
+		players = {
+			{name = "Sneaky", class = "ROGUE", classID = 2, role = "DAMAGER"},
+			{name = "Backstab", class = "ROGUE", classID = 2, role = "DAMAGER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Retadin[2], T.BUFF_MIGHT, "ret paladin with improved might should cover rogue might")
+end)
+
+test("plain sanctuary paladin is fallback when no prot sanctuary exists", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 2,
+		healingPaladinPresent = true,
+		improvedWisdomPaladinPresent = true,
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 2), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Retadin", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4), [T.BUFF_SANCTUARY] = skill(5)}},
+		},
+		players = {
+			{name = "Shieldwall", class = "WARRIOR", classID = 1, role = "TANK"},
+			{name = "Slammer", class = "WARRIOR", classID = 1, role = "DAMAGER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.normalAssignments.Retadin[1].Shieldwall, T.BUFF_SANCTUARY, "plain sanctuary should be used when improved sanctuary is unavailable")
+end)
+
 test("uncertain damage druid and shaman are reported for manual choice", function()
 	local context = {
 		players = {
@@ -709,6 +750,10 @@ test("simulation prot paladin provides blessing of sanctuary", function()
 			assertEquals(paladin.role, "TANK", "prot paladin role")
 			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_SANCTUARY), true, "prot paladin can cast sanctuary")
 		end
+		if paladin.name == "PpaSimRet1" then
+			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_SANCTUARY), true, "ret paladin can cast plain sanctuary")
+			assertEquals(paladin.skills[T.BUFF_MIGHT].talent, 2, "ret paladin should model improved might")
+		end
 	end
 	assertEquals(protName, "PpaSimProt1", "simulation should include prot paladin")
 
@@ -727,6 +772,23 @@ test("simulation prot paladin provides blessing of sanctuary", function()
 		end
 	end
 	assertEquals(protProvidesSanctuary, true, "prot paladin should provide sanctuary")
+
+	for _, unit in ipairs(context.players) do
+		if unit.role == "TANK" then
+			local hasSanctuary = false
+			for _, classMap in pairs(plan.assignments or {}) do
+				if classMap[unit.classID] == T.BUFF_SANCTUARY then
+					hasSanctuary = true
+				end
+			end
+			for _, classMap in pairs(plan.normalAssignments or {}) do
+				if classMap[unit.classID] and classMap[unit.classID][unit.name] == T.BUFF_SANCTUARY then
+					hasSanctuary = true
+				end
+			end
+			assertEquals(hasSanctuary, true, unit.name .. " should have sanctuary coverage")
+		end
+	end
 end)
 
 test("runtime context uses active simulation instead of live unit APIs", function()
