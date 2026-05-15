@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+## [0.1.15] - 2026-05-15
+
+### Added
+- Paladins running PPA broadcast their active spec and exact improved blessing talent ranks (Improved Might, Improved Wisdom, Improved Sanctuary, Blessing of Kings) to raid/party peers via addon messaging. Received data overrides the talent fields inferred from PallyPower's AllPallys table, giving the planner exact knowledge of whether improved blessings are available rather than guessing from role and class. The local player's own talents are always read directly from the active talent group. Existing AllPallys-based behaviour is unchanged for paladins not running PPA.
+
 ## [0.1.14] - 2026-05-15
 
 ### Changed

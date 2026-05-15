@@ -2,6 +2,7 @@ local addonName = ...
 
 local PPA = _G.PallyPowerAdvanced or {}
 _G.PallyPowerAdvanced = PPA
+PPA.peerSpecs = PPA.peerSpecs or {}
 
 local Unpack = unpack or table.unpack
 
@@ -23,6 +24,9 @@ local BUFF_WARNING_RESTORE_DELAY = 2
 local BUFF_WARNING_SOUND_CHANNEL = "Master"
 local BUFF_WARNING_SOUNDKIT = "UI_PROFESSIONS_NEW_RECIPE_LEARNED_TOAST"
 local BUFF_WARNING_SOUNDKIT_FALLBACK = "IG_MAINMENU_OPTION_CHECKBOX_ON"
+
+local PPA_SPEC_PREFIX = "PPA"
+local PPA_SPEC_VERSION = 1
 
 local SIMULATION_ROSTER_SIZE = 25
 local SIMULATION_LOCAL_PALADIN = "PpaSimHoly"
@@ -1856,17 +1860,39 @@ function PPA:BuildPaladinSkills(name)
 	local skills = {}
 	local allPallys = _G.AllPallys
 	local info = allPallys and allPallys[name]
-	if type(info) ~= "table" then
-		return skills
-	end
-	for buff = BUFF_WISDOM, BUFF_SANCTUARY do
-		if type(info[buff]) == "table" then
-			skills[buff] = {
-				rank = SafeNumber(info[buff].rank, 0),
-				talent = SafeNumber(info[buff].talent, 0),
-			}
+	if type(info) == "table" then
+		for buff = BUFF_WISDOM, BUFF_SANCTUARY do
+			if type(info[buff]) == "table" then
+				skills[buff] = {
+					rank   = SafeNumber(info[buff].rank, 0),
+					talent = SafeNumber(info[buff].talent, 0),
+				}
+			end
 		end
 	end
+
+	local specData
+	local UnitName = _G.UnitName
+	if type(UnitName) == "function" and name == UnitName("player") then
+		specData = self:ReadLocalTalents()
+	else
+		specData = self.peerSpecs[name]
+	end
+
+	if specData then
+		local overrides = {
+			[BUFF_MIGHT]     = specData.impMight,
+			[BUFF_WISDOM]    = specData.impWisdom,
+			[BUFF_SANCTUARY] = specData.impSanc,
+			[BUFF_KINGS]     = specData.kings,
+		}
+		for buff, talentRank in pairs(overrides) do
+			if skills[buff] then
+				skills[buff].talent = talentRank
+			end
+		end
+	end
+
 	return skills
 end
 
@@ -1888,6 +1914,93 @@ function PPA:BuildPaladinAuras(name)
 		end
 	end
 	return auras
+end
+
+local SPEC_TALENT_NAMES = {
+	["Improved Blessing of Might"]    = "impMight",
+	["Improved Blessing of Wisdom"]   = "impWisdom",
+	["Improved Blessing of Sanctuary"] = "impSanc",
+	["Blessing of Kings"]             = "kings",
+}
+
+function PPA:ReadLocalTalents()
+	local GetActiveTalentGroup = _G.GetActiveTalentGroup
+	local GetNumTalentTabs     = _G.GetNumTalentTabs
+	local GetNumTalents        = _G.GetNumTalents
+	local GetTalentTabInfo     = _G.GetTalentTabInfo
+	local GetTalentInfo        = _G.GetTalentInfo
+	if not GetActiveTalentGroup or not GetTalentInfo then
+		return nil
+	end
+
+	local activeGroup = GetActiveTalentGroup() or 1
+	local numTabs = (GetNumTalentTabs and GetNumTalentTabs()) or 3
+
+	local result = {activeTab = 1, impMight = 0, impWisdom = 0, impSanc = 0, kings = 0}
+
+	local bestPoints = -1
+	for tab = 1, numTabs do
+		local _, _, _, _, pointsSpent = GetTalentTabInfo(tab, false, false, activeGroup)
+		if (pointsSpent or 0) > bestPoints then
+			bestPoints = pointsSpent or 0
+			result.activeTab = tab
+		end
+	end
+
+	for tab = 1, numTabs do
+		local numTalents = (GetNumTalents and GetNumTalents(tab)) or 0
+		for i = 1, numTalents do
+			local name, _, _, _, rank = GetTalentInfo(tab, i, false, false, activeGroup)
+			local field = name and SPEC_TALENT_NAMES[name]
+			if field then
+				result[field] = rank or 0
+			end
+		end
+	end
+
+	return result
+end
+
+function PPA:BroadcastSpec()
+	local C_ChatInfo = _G.C_ChatInfo
+	if not C_ChatInfo or not C_ChatInfo.SendAddonMessage then
+		return
+	end
+	local t = self:ReadLocalTalents()
+	if not t then
+		return
+	end
+	local msg = string.format("SPEC:%d|M:%d|W:%d|S:%d|K:%d|v:%d",
+		t.activeTab, t.impMight, t.impWisdom, t.impSanc, t.kings, PPA_SPEC_VERSION)
+	local IsInRaid  = _G.IsInRaid
+	local IsInGroup = _G.IsInGroup
+	local channel
+	if IsInRaid and IsInRaid() then
+		channel = "RAID"
+	elseif IsInGroup and IsInGroup() then
+		channel = "PARTY"
+	else
+		return
+	end
+	C_ChatInfo.SendAddonMessage(PPA_SPEC_PREFIX, msg, channel)
+end
+
+function PPA:HandleAddonMessage(prefix, text, _, sender)
+	if prefix ~= PPA_SPEC_PREFIX or not text or not sender then
+		return
+	end
+	local activeTab = tonumber(text:match("^SPEC:(%d+)"))
+	if not activeTab then
+		return
+	end
+	local name = sender:match("^([^%-]+)") or sender
+	self.peerSpecs[name] = {
+		activeTab = activeTab,
+		impMight  = tonumber(text:match("|M:(%d+)")) or 0,
+		impWisdom = tonumber(text:match("|W:(%d+)")) or 0,
+		impSanc   = tonumber(text:match("|S:(%d+)")) or 0,
+		kings     = tonumber(text:match("|K:(%d+)")) or 0,
+	}
 end
 
 function PPA:GetClassID(classFile)
@@ -3391,7 +3504,7 @@ function PPA:RegisterSlash()
 	end
 end
 
-function PPA:OnEvent(event, arg1)
+function PPA:OnEvent(event, arg1, arg2, arg3, arg4)
 	if event == "ADDON_LOADED" then
 		if arg1 == addonName then
 			self:EnsureDB()
@@ -3406,6 +3519,13 @@ function PPA:OnEvent(event, arg1)
 		self:RestoreStaleSimulationState()
 		self:RegisterSlash()
 		self:HookPallyPower()
+		self:BroadcastSpec()
+	elseif event == "PLAYER_ENTERING_WORLD" then
+		self:BroadcastSpec()
+	elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
+		self:BroadcastSpec()
+	elseif event == "CHAT_MSG_ADDON" then
+		self:HandleAddonMessage(arg1, arg2, arg3, arg4)
 	end
 end
 
@@ -3418,13 +3538,20 @@ function PPA:Initialize()
 		local eventFrame = _G.CreateFrame("Frame")
 		eventFrame:RegisterEvent("ADDON_LOADED")
 		eventFrame:RegisterEvent("PLAYER_LOGIN")
-		eventFrame:SetScript("OnEvent", function(_, event, arg1)
-			PPA:OnEvent(event, arg1)
+		eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+		eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+		eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+		eventFrame:RegisterEvent("CHAT_MSG_ADDON")
+		eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
+			PPA:OnEvent(event, arg1, arg2, arg3, arg4)
 		end)
 		eventFrame:SetScript("OnUpdate", function(_, elapsed)
 			PPA:OnUpdate(elapsed)
 		end)
 		self.eventFrame = eventFrame
+	end
+	if _G.C_ChatInfo and _G.C_ChatInfo.RegisterAddonMessagePrefix then
+		_G.C_ChatInfo.RegisterAddonMessagePrefix(PPA_SPEC_PREFIX)
 	end
 end
 
