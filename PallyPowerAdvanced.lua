@@ -610,22 +610,27 @@ function PPA:ScorePaladinForBuff(paladin, buff)
 	return score
 end
 
+function PPA:ScorePaladinForClassBuff(context, paladin, buff, classID, members)
+	local score = self:ScorePaladinForBuff(paladin, buff)
+	if paladin.name == context.playerName and buff == BUFF_SANCTUARY and paladin.role == ROLE_TANK then
+		score = score + 15
+	end
+	if classID == CLASS_ID.PALADIN and buff == BUFF_SANCTUARY then
+		for _, unit in ipairs(members or {}) do
+			if unit.name == paladin.name and NormalizeRole(unit.role) == ROLE_TANK then
+				score = score + 25
+			end
+		end
+	end
+	return score
+end
+
 function PPA:SelectPaladinForBuff(context, buff, usedPaladins, classID, members)
 	local bestPaladin
 	local bestScore = -100000
 	for _, paladin in ipairs(context.paladins or {}) do
 		if not usedPaladins[paladin.name] and self:CanPaladinBuff(paladin, buff) then
-			local score = self:ScorePaladinForBuff(paladin, buff)
-			if paladin.name == context.playerName and buff == BUFF_SANCTUARY and paladin.role == ROLE_TANK then
-				score = score + 15
-			end
-			if classID == CLASS_ID.PALADIN and buff == BUFF_SANCTUARY then
-				for _, unit in ipairs(members or {}) do
-					if unit.name == paladin.name and NormalizeRole(unit.role) == ROLE_TANK then
-						score = score + 25
-					end
-				end
-			end
+			local score = self:ScorePaladinForClassBuff(context, paladin, buff, classID, members)
 			if score > bestScore or (score == bestScore and paladin.name < (bestPaladin and bestPaladin.name or "\255")) then
 				bestScore = score
 				bestPaladin = paladin
@@ -762,6 +767,90 @@ local function SortedScoredBuffs(scores)
 	return sorted
 end
 
+local function ClassAssignmentSignature(selected)
+	local pieces = {}
+	for _, assignment in ipairs(selected or {}) do
+		pieces[#pieces + 1] = tostring(assignment.buff) .. ":" .. tostring(assignment.paladin and assignment.paladin.name or "")
+	end
+	table.sort(pieces)
+	return table.concat(pieces, "|")
+end
+
+function PPA:OptimizeClassAssignments(context, classID, members, scoredBuffs, maxAssignments)
+	local bestCount = -1
+	local bestClassScore = -1
+	local bestPaladinScore = -1
+	local bestSelected = {}
+	local bestSignature = nil
+	local paladins = context.paladins or {}
+
+	local function classValue(scored)
+		return scored.score * 100 + (100 - (GENERAL_TIE_ORDER[scored.buff] or 99))
+	end
+
+	local function consider(selected, totalClassScore, totalPaladinScore)
+		local signature = ClassAssignmentSignature(selected)
+		if #selected > bestCount
+			or (#selected == bestCount and totalClassScore > bestClassScore)
+			or (#selected == bestCount and totalClassScore == bestClassScore and totalPaladinScore > bestPaladinScore)
+			or (
+				#selected == bestCount
+				and totalClassScore == bestClassScore
+				and totalPaladinScore == bestPaladinScore
+				and (not bestSignature or signature < bestSignature)
+			)
+		then
+			bestCount = #selected
+			bestClassScore = totalClassScore
+			bestPaladinScore = totalPaladinScore
+			bestSignature = signature
+			bestSelected = {}
+			for index, assignment in ipairs(selected) do
+				bestSelected[index] = {
+					buff = assignment.buff,
+					score = assignment.score,
+					paladin = assignment.paladin,
+					paladinScore = assignment.paladinScore,
+				}
+			end
+		end
+	end
+
+	local function search(index, usedPaladins, selected, totalClassScore, totalPaladinScore)
+		if index > #scoredBuffs or #selected >= maxAssignments then
+			consider(selected, totalClassScore, totalPaladinScore)
+			return
+		end
+
+		local scored = scoredBuffs[index]
+		if scored.score <= 0 then
+			search(index + 1, usedPaladins, selected, totalClassScore, totalPaladinScore)
+			return
+		end
+
+		search(index + 1, usedPaladins, selected, totalClassScore, totalPaladinScore)
+
+		for _, paladin in ipairs(paladins) do
+			if not usedPaladins[paladin.name] and self:CanPaladinBuff(paladin, scored.buff) then
+				local paladinScore = self:ScorePaladinForClassBuff(context, paladin, scored.buff, classID, members)
+				usedPaladins[paladin.name] = true
+				selected[#selected + 1] = {
+					buff = scored.buff,
+					score = scored.score,
+					paladin = paladin,
+					paladinScore = paladinScore,
+				}
+				search(index + 1, usedPaladins, selected, totalClassScore + classValue(scored), totalPaladinScore + paladinScore)
+				selected[#selected] = nil
+				usedPaladins[paladin.name] = nil
+			end
+		end
+	end
+
+	search(1, {}, {}, 0, 0)
+	return bestSelected
+end
+
 function PPA:SelectClassAssignments(context, classID, members, plan)
 	local scores = self:ScoreClassBuffs(members, context)
 	if classID == CLASS_ID.PALADIN and (context and context.pallyCount or 0) <= 2 then
@@ -779,25 +868,17 @@ function PPA:SelectClassAssignments(context, classID, members, plan)
 		end
 	end
 	local scoredBuffs = SortedScoredBuffs(scores)
-	local usedPaladins = {}
-	local selected = {}
 	local maxAssignments = math.min(#(context.paladins or {}), BUFF_SANCTUARY)
+	local selected = self:OptimizeClassAssignments(context, classID, members, scoredBuffs, maxAssignments)
 
-	for _, scored in ipairs(scoredBuffs) do
-		if #selected >= maxAssignments then
-			break
+	table.sort(selected, function(a, b)
+		if a.score ~= b.score then
+			return a.score > b.score
 		end
-		local paladin, paladinScore = self:SelectPaladinForBuff(context, scored.buff, usedPaladins, classID, members)
-		if paladin then
-			usedPaladins[paladin.name] = true
-			selected[#selected + 1] = {
-				buff = scored.buff,
-				score = scored.score,
-				paladin = paladin,
-				paladinScore = paladinScore,
-			}
-			SetPlanAssignment(plan, paladin, classID, scored.buff)
-		end
+		return (GENERAL_TIE_ORDER[a.buff] or 99) < (GENERAL_TIE_ORDER[b.buff] or 99)
+	end)
+	for _, assignment in ipairs(selected) do
+		SetPlanAssignment(plan, assignment.paladin, classID, assignment.buff)
 	end
 
 	return selected, scoredBuffs

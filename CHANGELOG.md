@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.1.11] - 2026-05-15
+
+### Fixed
+- Avoid assigning paladin-class Wisdom to Prot or Ret paladins when an Improved Wisdom Holy paladin can cover it.
+- Optimize class blessing ownership across the whole class row so specialized paladins are reserved for the blessings they are best suited to cast.
+
+### Tests
+- Add coverage for preserving Improved Wisdom paladins for Wisdom while keeping assumed missing-class blessing coverage intact.
+
 ## [0.1.10] - 2026-05-15
 
 ### Changed

@@ -153,6 +153,18 @@ test("improved might ret paladin is preferred for might", function()
 	assertEquals(plan.assignments.Retadin[2], T.BUFF_MIGHT, "ret paladin with improved might should cover rogue might")
 end)
 
+test("improved wisdom paladin is reserved for wisdom", function()
+	local context = T.BuildSimulationContext(1)
+	local plan = T.BuildSmartPlan(context)
+	local wisdomPaladin
+	for paladinName, classMap in pairs(plan.assignments) do
+		if classMap[5] == T.BUFF_WISDOM then
+			wisdomPaladin = paladinName
+		end
+	end
+	assertEquals(wisdomPaladin, "PpaSimHoly", "improved wisdom paladin should cover paladin wisdom")
+end)
+
 test("plain sanctuary paladin is fallback when no prot sanctuary exists", function()
 	local context = {
 		playerName = "Holyone",
@@ -238,8 +250,12 @@ test("missing warlock class still receives assumed class-wide assignments", func
 	}
 
 	local plan = T.BuildSmartPlan(context)
-	assertEquals(plan.assignments.Holyone[8], T.BUFF_SALVATION, "assumed warlocks should get salvation")
-	assertEquals(plan.assignments.Tankadin[8], T.BUFF_KINGS, "assumed warlocks should get kings")
+	local warlockBuffs = {
+		[plan.assignments.Holyone[8]] = true,
+		[plan.assignments.Tankadin[8]] = true,
+	}
+	assertEquals(warlockBuffs[T.BUFF_SALVATION], true, "assumed warlocks should get salvation")
+	assertEquals(warlockBuffs[T.BUFF_KINGS], true, "assumed warlocks should get kings")
 	assertEquals(plan.normalAssignments.Tankadin and plan.normalAssignments.Tankadin[8], nil, "assumed classes should not create single-target overrides")
 end)
 
