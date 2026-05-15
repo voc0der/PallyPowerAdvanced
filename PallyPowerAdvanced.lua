@@ -3,6 +3,8 @@ local addonName = ...
 local PPA = _G.PallyPowerAdvanced or {}
 _G.PallyPowerAdvanced = PPA
 
+local Unpack = unpack or table.unpack
+
 local BUFF_WISDOM = 1
 local BUFF_MIGHT = 2
 local BUFF_KINGS = 3
@@ -1840,7 +1842,8 @@ function PPA:WithSimulationUnitAPIs(callback)
 		return SIMULATION_ROSTER_SIZE
 	end
 	_G.GetRaidRosterInfo = function(index)
-		local unit = PPA.simulation and PPA.simulation.rosterByIndex and PPA.simulation.rosterByIndex[index]
+		local rosterIndex = SafeNumber(index, index)
+		local unit = PPA.simulation and PPA.simulation.rosterByIndex and PPA.simulation.rosterByIndex[rosterIndex]
 		if not unit then
 			return nil
 		end
@@ -1911,7 +1914,7 @@ function PPA:WithSimulationUnitAPIs(callback)
 		error(results[2])
 	end
 	table.remove(results, 1)
-	return unpack(results)
+	return Unpack(results)
 end
 
 function PPA:CollectRoster()
@@ -2213,7 +2216,7 @@ function PPA:InstallSimulationHooks()
 			if PPA:IsSimulationActive() then
 				local args = {...}
 				return PPA:WithSimulationUnitAPIs(function()
-					return original(target, unpack(args))
+					return original(target, Unpack(args))
 				end)
 			end
 			return original(target, ...)
@@ -2963,6 +2966,12 @@ PPA._test = {
 	end,
 	BuildSimulationContext = function(seed)
 		return PPA:BuildSimulationContext(seed)
+	end,
+	PrepareSimulationUnitMaps = function(context)
+		return PPA:PrepareSimulationUnitMaps(context)
+	end,
+	WithSimulationUnitAPIs = function(callback)
+		return PPA:WithSimulationUnitAPIs(callback)
 	end,
 	ActivateSimulation = function(seed)
 		return PPA:ActivateSimulation(seed)

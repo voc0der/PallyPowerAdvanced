@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-15
+
+### Fixed
+- Fix `/ppa simulate` so PallyPower's class panes populate with simulated player names for per-player normal blessing overrides.
+
+### Tests
+- Add coverage for PallyPower's string raid roster indexes in the simulation unit API shim.
+
 ## [0.1.7] - 2026-05-15
 
 ### Added

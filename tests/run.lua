@@ -673,6 +673,30 @@ test("runtime context uses active simulation instead of live unit APIs", functio
 	_G.IsInRaid = old.IsInRaid
 end)
 
+test("simulation unit APIs support PallyPower string raid roster indexes", function()
+	local old = {
+		simulation = PPA.simulation,
+	}
+	local context = T.BuildSimulationContext(31)
+	PPA.simulation = {
+		active = true,
+		context = context,
+	}
+	T.PrepareSimulationUnitMaps(context)
+
+	T.WithSimulationUnitAPIs(function()
+		local expected = context.players[9]
+		local name, _, subgroup, _, _, classFile = _G.GetRaidRosterInfo("9")
+		assertEquals(name, expected.fullName, "string roster index should resolve player name")
+		assertEquals(subgroup, expected.subgroup, "string roster index should resolve subgroup")
+		assertEquals(classFile, expected.class, "string roster index should resolve class")
+		assertEquals(_G.UnitExists("raid9"), true, "raid token should exist")
+		assertEquals(_G.UnitClassBase("raid9"), expected.class, "raid token class")
+	end)
+
+	PPA.simulation = old.simulation
+end)
+
 test("applying a simulation plan stays local and does not broadcast", function()
 	local old = {
 		PallyPower = _G.PallyPower,
