@@ -172,7 +172,7 @@ local MANUAL_CHOICES = {
 local ASSUMED_MISSING_CLASS_UNITS = {
 	[CLASS_ID.WARRIOR] = {role = ROLE_DAMAGER},
 	[CLASS_ID.ROGUE] = {role = ROLE_DAMAGER},
-	[CLASS_ID.PRIEST] = {role = ROLE_HEALER},
+	[CLASS_ID.PRIEST] = {role = ROLE_DAMAGER},
 	[CLASS_ID.DRUID] = {role = ROLE_DAMAGER, spec = "FERAL"},
 	[CLASS_ID.PALADIN] = {role = ROLE_DAMAGER},
 	[CLASS_ID.HUNTER] = {role = ROLE_DAMAGER},
@@ -407,7 +407,7 @@ function PPA:ApplyGuess(unit)
 		end
 	elseif unit.class == "PRIEST" then
 		if originalRole == ROLE_NONE then
-			unit.role = ROLE_HEALER
+			unit.role = ROLE_DAMAGER
 			unit.guessed = true
 		end
 	elseif unit.class == "DRUID" then
