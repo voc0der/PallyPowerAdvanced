@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-15
+
+### Added
+- Add `/ppa simulate` to open the PallyPower assignment screen with a local-only 25-player simulated raid, including 2-3 tanks, 4-9 healers, DPS fill, all TBC classes, and fake paladin skill data for Smart-Assign testing.
+- Add `/ppa simulate off` to restore the previous PallyPower assignment state after simulation testing.
+
+### Changed
+- Suppress PallyPower assignment broadcasts while simulation mode is active so simulated raids stay local.
+
+### Tests
+- Expand the Lua test suite to cover simulated raid composition, Smart-Assign planning against simulated raids, and local-only simulation plan application.
+
 ## [0.1.6] - 2026-05-14
 
 ### Changed

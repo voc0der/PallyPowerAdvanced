@@ -8,10 +8,11 @@
 - Handles class-wide greater blessings and per-player normal blessing overrides
 - Assigns paladin auras by subgroup
 - Prompts for uncertain hybrid role/spec cases instead of silently guessing
+- Simulates a full local raid for Smart-Assign testing
 - Alerts you when another paladin changes your assignments
 - Plays a one-minute warning sound when one of your assigned blessings is about to expire
 
-Current version: `0.1.6`
+Current version: `0.1.7`
 
 ## Smart Assign
 
@@ -22,6 +23,14 @@ Current version: `0.1.6`
 - Prompts before guessing uncertain role/spec cases, including damage druids and shamans
 - Prints local instructions for paladins in the group who do not have PallyPower enabled
 - Provides `/ppa debug` for local reasoning output
+
+## Simulation
+
+- `/ppa simulate`: Open PallyPower's assignment screen with a local-only 25-player simulated raid
+- Simulated raids include every TBC class, 2-3 tanks, 4-9 healers, DPS fill, and 3-5 paladins with fake PallyPower skill data
+- While simulation is active, assignment messages are not broadcast
+- `/ppa smart`: Run Smart-Assign against the simulated raid
+- `/ppa simulate off`: Restore the previous PallyPower assignment state
 
 ## Aura Assign
 
@@ -51,6 +60,8 @@ Current version: `0.1.6`
 - `/ppa debug on`: Enable debug reasoning
 - `/ppa debug off`: Disable debug reasoning
 - `/ppa sound`: Toggle the one-minute buff warning sound
+- `/ppa simulate`: Open a local 25-player simulation raid
+- `/ppa simulate off`: Restore the previous PallyPower assignment state
 - `/ppa specs`: Reopen the manual role/spec assignment popup
 - `/ppa help`: Show command help
 

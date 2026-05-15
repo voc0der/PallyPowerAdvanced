@@ -22,6 +22,9 @@ local BUFF_WARNING_SOUND_CHANNEL = "Master"
 local BUFF_WARNING_SOUNDKIT = "UI_PROFESSIONS_NEW_RECIPE_LEARNED_TOAST"
 local BUFF_WARNING_SOUNDKIT_FALLBACK = "IG_MAINMENU_OPTION_CHECKBOX_ON"
 
+local SIMULATION_ROSTER_SIZE = 25
+local SIMULATION_LOCAL_PALADIN = "PpaSimHoly"
+
 local ROLE_TANK = "TANK"
 local ROLE_HEALER = "HEALER"
 local ROLE_DAMAGER = "DAMAGER"
@@ -182,6 +185,22 @@ local function AddUnique(list, value)
 		end
 	end
 	list[#list + 1] = value
+end
+
+local function DeepCopy(value, seen)
+	if type(value) ~= "table" then
+		return value
+	end
+	seen = seen or {}
+	if seen[value] then
+		return seen[value]
+	end
+	local copy = {}
+	seen[value] = copy
+	for key, item in pairs(value) do
+		copy[DeepCopy(key, seen)] = DeepCopy(item, seen)
+	end
+	return copy
 end
 
 local function BuildPriority(includeLight, ...)
@@ -1459,6 +1478,442 @@ function PPA:RefreshPallyPowerState()
 	end
 end
 
+local SIMULATION_TANK_CLASSES = {"WARRIOR", "DRUID", "PALADIN"}
+local SIMULATION_HEALER_CLASSES = {"PRIEST", "DRUID", "PALADIN", "SHAMAN"}
+local SIMULATION_DPS_CLASSES = {
+	"WARRIOR",
+	"ROGUE",
+	"DRUID",
+	"PALADIN",
+	"HUNTER",
+	"MAGE",
+	"WARLOCK",
+	"SHAMAN",
+	"PRIEST",
+}
+
+local SIMULATION_BASE_NAMES = {
+	WARRIOR = "War",
+	ROGUE = "Rogue",
+	PRIEST = "Priest",
+	DRUID = "Druid",
+	PALADIN = "Pally",
+	HUNTER = "Hunter",
+	MAGE = "Mage",
+	WARLOCK = "Lock",
+	SHAMAN = "Shaman",
+}
+
+local function CreateSimulationRng(seed)
+	local state = SafeNumber(seed, 1)
+	if state <= 0 then
+		state = 1
+	end
+	state = state % 2147483647
+	if state == 0 then
+		state = 1
+	end
+	return function(max)
+		state = (state * 48271) % 2147483647
+		if not max or max <= 0 then
+			return state
+		end
+		return (state % max) + 1
+	end
+end
+
+local function SimulationChoice(rng, list)
+	return list[rng(#list)]
+end
+
+local function SimulationDpsSpec(classFile, rng)
+	if classFile == "DRUID" then
+		return rng(2) == 1 and "FERAL" or "BALANCE"
+	elseif classFile == "SHAMAN" then
+		return rng(2) == 1 and "ENHANCEMENT" or "ELEMENTAL"
+	elseif classFile == "PRIEST" then
+		return "SHADOW"
+	end
+	return nil
+end
+
+local function SimulationTankSpec(classFile)
+	if classFile == "DRUID" then
+		return "FERAL_TANK"
+	end
+	return nil
+end
+
+local function SimulationHealerSpec(classFile)
+	if classFile == "DRUID" or classFile == "SHAMAN" then
+		return "RESTORATION"
+	end
+	return nil
+end
+
+local function SimulationRaidRole(role)
+	if NormalizeRole(role) == ROLE_TANK then
+		return "MAINTANK"
+	end
+	return NormalizeRole(role)
+end
+
+function PPA:BuildSimulationPaladinSkills(role)
+	role = NormalizeRole(role)
+	local skills = {
+		[BUFF_WISDOM] = {rank = 7, talent = role == ROLE_HEALER and 2 or 0},
+		[BUFF_MIGHT] = {rank = 7, talent = role == ROLE_DAMAGER and 2 or 0},
+		[BUFF_KINGS] = {rank = 1, talent = 0},
+		[BUFF_SALVATION] = {rank = 1, talent = 0},
+		[BUFF_LIGHT] = {rank = 4, talent = 0},
+	}
+	if role == ROLE_TANK then
+		skills[BUFF_SANCTUARY] = {rank = 5, talent = 2}
+	end
+	return skills
+end
+
+function PPA:BuildSimulationPaladinAuras(role)
+	role = NormalizeRole(role)
+	return {
+		[AURA_DEVOTION] = {rank = 7, talent = role == ROLE_TANK and 2 or 0},
+		[AURA_RETRIBUTION] = {rank = 5, talent = role == ROLE_DAMAGER and 1 or 0},
+		[AURA_CONCENTRATION] = {rank = 1, talent = role == ROLE_HEALER and 1 or 0},
+	}
+end
+
+function PPA:GetNextSimulationSeed()
+	local db = self:EnsureDB()
+	db.simulationSeed = SafeNumber(db.simulationSeed, 0) + 1
+	return db.simulationSeed
+end
+
+function PPA:BuildSimulationContext(seed)
+	seed = SafeNumber(seed, 1)
+	local rng = CreateSimulationRng(seed)
+	local targetTanks = 2 + rng(2) - 1
+	local targetHealers = 4 + rng(6) - 1
+	local targetPaladins = 3 + rng(3) - 1
+	local players = {}
+	local classCounts = {}
+	local roleCounts = {
+		[ROLE_TANK] = 0,
+		[ROLE_HEALER] = 0,
+		[ROLE_DAMAGER] = 0,
+	}
+	local nameCounts = {}
+
+	local function nextName(classFile)
+		nameCounts[classFile] = (nameCounts[classFile] or 0) + 1
+		return "PpaSim" .. (SIMULATION_BASE_NAMES[classFile] or classFile) .. tostring(nameCounts[classFile])
+	end
+
+	local function addPlayer(classFile, role, spec, name)
+		local classID = CLASS_ID[classFile]
+		if not classID then
+			return nil
+		end
+		name = name or nextName(classFile)
+		local unit = {
+			name = name,
+			fullName = name,
+			key = name,
+			class = classFile,
+			classID = classID,
+			role = NormalizeRole(role),
+			spec = spec,
+			simulation = true,
+		}
+		players[#players + 1] = unit
+		classCounts[classFile] = (classCounts[classFile] or 0) + 1
+		roleCounts[unit.role] = (roleCounts[unit.role] or 0) + 1
+		return unit
+	end
+
+	local function chooseClass(list)
+		for _ = 1, #list do
+			local classFile = SimulationChoice(rng, list)
+			if classFile ~= "PALADIN" or (classCounts.PALADIN or 0) < targetPaladins then
+				return classFile
+			end
+		end
+		for _, classFile in ipairs(list) do
+			if classFile ~= "PALADIN" then
+				return classFile
+			end
+		end
+		return list[1]
+	end
+
+	addPlayer("PALADIN", ROLE_HEALER, nil, SIMULATION_LOCAL_PALADIN)
+	addPlayer("WARRIOR", ROLE_TANK)
+	addPlayer("PRIEST", ROLE_HEALER)
+	addPlayer("DRUID", ROLE_DAMAGER, SimulationDpsSpec("DRUID", rng))
+	addPlayer("ROGUE", ROLE_DAMAGER)
+	addPlayer("HUNTER", ROLE_DAMAGER)
+	addPlayer("MAGE", ROLE_DAMAGER)
+	addPlayer("WARLOCK", ROLE_DAMAGER)
+	addPlayer("SHAMAN", ROLE_DAMAGER, SimulationDpsSpec("SHAMAN", rng))
+
+	while roleCounts[ROLE_TANK] < targetTanks do
+		local classFile = chooseClass(SIMULATION_TANK_CLASSES)
+		addPlayer(classFile, ROLE_TANK, SimulationTankSpec(classFile))
+	end
+
+	while roleCounts[ROLE_HEALER] < targetHealers do
+		local classFile = chooseClass(SIMULATION_HEALER_CLASSES)
+		addPlayer(classFile, ROLE_HEALER, SimulationHealerSpec(classFile))
+	end
+
+	while (classCounts.PALADIN or 0) < targetPaladins do
+		local role = ROLE_DAMAGER
+		if roleCounts[ROLE_TANK] < targetTanks then
+			role = ROLE_TANK
+		elseif roleCounts[ROLE_HEALER] < targetHealers then
+			role = ROLE_HEALER
+		end
+		addPlayer("PALADIN", role)
+	end
+
+	while #players < SIMULATION_ROSTER_SIZE do
+		local classFile = chooseClass(SIMULATION_DPS_CLASSES)
+		addPlayer(classFile, ROLE_DAMAGER, SimulationDpsSpec(classFile, rng))
+	end
+
+	for index = #players, 2, -1 do
+		local swap = 2 + rng(index - 1) - 1
+		players[index], players[swap] = players[swap], players[index]
+	end
+
+	for index, unit in ipairs(players) do
+		unit.unit = "raid" .. tostring(index)
+		unit.subgroup = math.floor((index - 1) / 5) + 1
+		unit.rank = unit.name == SIMULATION_LOCAL_PALADIN and 2 or (unit.class == "PALADIN" and 1 or 0)
+		unit.mainTank = NormalizeRole(unit.role) == ROLE_TANK
+		unit.raidRole = SimulationRaidRole(unit.role)
+	end
+
+	local paladins = {}
+	local context = {
+		players = players,
+		paladins = paladins,
+		pallyCount = 0,
+		playerName = SIMULATION_LOCAL_PALADIN,
+		healingPaladinPresent = false,
+		improvedWisdomPaladinPresent = false,
+		simulation = true,
+		simulationSeed = seed,
+		simulationSummary = {
+			tanks = roleCounts[ROLE_TANK] or 0,
+			healers = roleCounts[ROLE_HEALER] or 0,
+			dps = roleCounts[ROLE_DAMAGER] or 0,
+			paladins = classCounts.PALADIN or 0,
+		},
+	}
+
+	for _, unit in ipairs(players) do
+		if unit.class == "PALADIN" then
+			local paladin = DeepCopy(unit)
+			paladin.hasAddon = true
+			paladin.skills = self:BuildSimulationPaladinSkills(unit.role)
+			paladin.auras = self:BuildSimulationPaladinAuras(unit.role)
+			paladins[#paladins + 1] = paladin
+			if NormalizeRole(paladin.role) == ROLE_HEALER then
+				context.healingPaladinPresent = true
+			end
+			if PaladinHasImprovedWisdom(paladin) then
+				context.improvedWisdomPaladinPresent = true
+			end
+		end
+	end
+	context.pallyCount = #paladins
+
+	return context
+end
+
+function PPA:IsSimulationActive()
+	return type(self.simulation) == "table" and self.simulation.active == true and type(self.simulation.context) == "table"
+end
+
+function PPA:GetSimulationUnit(identifier)
+	if not self:IsSimulationActive() then
+		return nil
+	end
+	local simulation = self.simulation
+	return (simulation.unitsByToken and simulation.unitsByToken[identifier])
+		or (simulation.unitsByName and simulation.unitsByName[identifier])
+end
+
+function PPA:PrepareSimulationUnitMaps(context)
+	local unitsByToken = {}
+	local unitsByName = {}
+	local rosterByIndex = {}
+	for index, unit in ipairs(context.players or {}) do
+		rosterByIndex[index] = unit
+		unitsByToken["raid" .. tostring(index)] = unit
+		unitsByName[unit.name] = unit
+		unitsByName[unit.fullName] = unit
+		if unit.name == context.playerName then
+			unitsByToken.player = unit
+		end
+	end
+	self.simulation.unitsByToken = unitsByToken
+	self.simulation.unitsByName = unitsByName
+	self.simulation.rosterByIndex = rosterByIndex
+end
+
+function PPA:CloneSimulationContext(guess)
+	local context = DeepCopy(self.simulation and self.simulation.context)
+	if type(context) ~= "table" then
+		return nil
+	end
+
+	context.healingPaladinPresent = false
+	context.improvedWisdomPaladinPresent = false
+	for _, unit in ipairs(context.players or {}) do
+		self:ApplyManualChoice(unit)
+		if guess then
+			self:ApplyGuess(unit)
+		end
+	end
+	for _, paladin in ipairs(context.paladins or {}) do
+		self:ApplyManualChoice(paladin)
+		if guess then
+			self:ApplyGuess(paladin)
+		end
+		if NormalizeRole(paladin.role) == ROLE_HEALER then
+			context.healingPaladinPresent = true
+		end
+		if PaladinHasImprovedWisdom(paladin) then
+			context.improvedWisdomPaladinPresent = true
+		end
+	end
+	return context
+end
+
+function PPA:WithSimulationUnitAPIs(callback)
+	if not self:IsSimulationActive() then
+		return callback()
+	end
+
+	local previous = {}
+	local names = {
+		"IsInRaid",
+		"IsInGroup",
+		"IsInInstance",
+		"GetNumGroupMembers",
+		"GetRaidRosterInfo",
+		"GetInstanceInfo",
+		"UnitExists",
+		"GetUnitName",
+		"UnitName",
+		"UnitClassBase",
+		"UnitClass",
+		"UnitGroupRolesAssigned",
+		"UnitIsGroupLeader",
+		"UnitIsGroupAssistant",
+		"UnitIsVisible",
+		"UnitIsConnected",
+		"UnitIsDeadOrGhost",
+		"UnitBuff",
+		"UnitGUID",
+		"IsSpellInRange",
+	}
+	for _, name in ipairs(names) do
+		previous[name] = _G[name]
+	end
+
+	local function unitFor(identifier)
+		return PPA:GetSimulationUnit(identifier)
+	end
+
+	_G.IsInRaid = function()
+		return true
+	end
+	_G.IsInGroup = function()
+		return true
+	end
+	_G.IsInInstance = function()
+		return false
+	end
+	_G.GetNumGroupMembers = function()
+		return SIMULATION_ROSTER_SIZE
+	end
+	_G.GetRaidRosterInfo = function(index)
+		local unit = PPA.simulation and PPA.simulation.rosterByIndex and PPA.simulation.rosterByIndex[index]
+		if not unit then
+			return nil
+		end
+		return unit.fullName, unit.rank or 0, unit.subgroup or 1, 70, ClassText(unit.classID), unit.class, "PPA Simulation", true, false, unit.raidRole
+	end
+	_G.GetInstanceInfo = function()
+		return "PPA Simulation", "raid", 0, "Normal", SIMULATION_ROSTER_SIZE
+	end
+	_G.UnitExists = function(identifier)
+		return unitFor(identifier) ~= nil
+	end
+	_G.GetUnitName = function(identifier)
+		local unit = unitFor(identifier)
+		return unit and unit.fullName or nil
+	end
+	_G.UnitName = function(identifier)
+		local unit = unitFor(identifier)
+		return unit and unit.name or nil
+	end
+	_G.UnitClassBase = function(identifier)
+		local unit = unitFor(identifier)
+		return unit and unit.class or nil
+	end
+	_G.UnitClass = function(identifier)
+		local unit = unitFor(identifier)
+		if unit then
+			return ClassText(unit.classID), unit.class
+		end
+		return nil
+	end
+	_G.UnitGroupRolesAssigned = function(identifier)
+		local unit = unitFor(identifier)
+		return unit and NormalizeRole(unit.role) or ROLE_NONE
+	end
+	_G.UnitIsGroupLeader = function(identifier)
+		local unit = unitFor(identifier)
+		return unit and unit.rank == 2 or false
+	end
+	_G.UnitIsGroupAssistant = function(identifier)
+		local unit = unitFor(identifier)
+		return unit and unit.rank == 1 or false
+	end
+	_G.UnitIsVisible = function(identifier)
+		return unitFor(identifier) ~= nil
+	end
+	_G.UnitIsConnected = function(identifier)
+		return unitFor(identifier) ~= nil
+	end
+	_G.UnitIsDeadOrGhost = function()
+		return false
+	end
+	_G.UnitBuff = function()
+		return nil
+	end
+	_G.UnitGUID = function(identifier)
+		local unit = unitFor(identifier)
+		return unit and ("Player-PpaSim-" .. tostring(unit.unit or unit.name)) or nil
+	end
+	_G.IsSpellInRange = function(_, identifier)
+		return unitFor(identifier) and 1 or 0
+	end
+
+	local results = {pcall(callback)}
+	for _, name in ipairs(names) do
+		_G[name] = previous[name]
+	end
+	if not results[1] then
+		error(results[2])
+	end
+	table.remove(results, 1)
+	return unpack(results)
+end
+
 function PPA:CollectRoster()
 	local players = {}
 	local units = {}
@@ -1536,6 +1991,9 @@ end
 
 function PPA:BuildRuntimeContext(guess)
 	self:EnsureDB()
+	if self:IsSimulationActive() then
+		return self:CloneSimulationContext(guess)
+	end
 	self:RefreshPallyPowerState()
 
 	local players = self:CollectRoster()
@@ -1630,6 +2088,276 @@ local function EnsurePallyPowerAuraAssignments()
 	return _G.PallyPower_AuraAssignments
 end
 
+function PPA:CapturePallyPowerState()
+	local pallyPower = _G.PallyPower
+	return {
+		AllPallys = DeepCopy(_G.AllPallys),
+		SyncList = DeepCopy(_G.SyncList),
+		PallyPower_Assignments = DeepCopy(_G.PallyPower_Assignments),
+		PallyPower_NormalAssignments = DeepCopy(_G.PallyPower_NormalAssignments),
+		PallyPower_AuraAssignments = DeepCopy(_G.PallyPower_AuraAssignments),
+		PP_Leader = _G.PP_Leader,
+		player = pallyPower and pallyPower.player,
+		freeassign = pallyPower and pallyPower.opt and pallyPower.opt.freeassign,
+	}
+end
+
+function PPA:SaveSimulationRestorePoint(state)
+	local db = self:EnsureDB()
+	db.simulationRestore = {
+		PallyPower_Assignments = DeepCopy(state and state.PallyPower_Assignments),
+		PallyPower_NormalAssignments = DeepCopy(state and state.PallyPower_NormalAssignments),
+		PallyPower_AuraAssignments = DeepCopy(state and state.PallyPower_AuraAssignments),
+		player = state and state.player,
+		freeassign = state and state.freeassign,
+		PP_Leader = state and state.PP_Leader,
+	}
+	db.simulationActive = true
+end
+
+function PPA:RestorePallyPowerState(state)
+	local db = self:EnsureDB()
+	state = state or db.simulationRestore
+	if type(state) ~= "table" then
+		return false
+	end
+
+	if state.AllPallys ~= nil then
+		_G.AllPallys = DeepCopy(state.AllPallys)
+	end
+	if state.SyncList ~= nil then
+		_G.SyncList = DeepCopy(state.SyncList)
+	end
+	_G.PallyPower_Assignments = DeepCopy(state.PallyPower_Assignments) or {}
+	_G.PallyPower_NormalAssignments = DeepCopy(state.PallyPower_NormalAssignments) or {}
+	_G.PallyPower_AuraAssignments = DeepCopy(state.PallyPower_AuraAssignments) or {}
+	if _G.PallyPower then
+		if state.player then
+			_G.PallyPower.player = state.player
+		end
+		if _G.PallyPower.opt and state.freeassign ~= nil then
+			_G.PallyPower.opt.freeassign = state.freeassign
+		end
+	end
+	if state.PP_Leader ~= nil then
+		_G.PP_Leader = state.PP_Leader
+	end
+
+	db.simulationRestore = nil
+	db.simulationActive = nil
+	return true
+end
+
+function PPA:RestoreStaleSimulationState()
+	local db = self:EnsureDB()
+	if self:IsSimulationActive() or type(db.simulationRestore) ~= "table" then
+		return
+	end
+	if self:RestorePallyPowerState(db.simulationRestore) then
+		Print("Restored PallyPower assignments from the previous PPA simulation session.")
+	end
+end
+
+function PPA:SeedPallyPowerSimulation(context)
+	_G.AllPallys = {}
+	_G.SyncList = {}
+	_G.PallyPower_Assignments = {}
+	_G.PallyPower_NormalAssignments = {}
+	_G.PallyPower_AuraAssignments = {}
+
+	for _, paladin in ipairs(context.paladins or {}) do
+		local info = DeepCopy(paladin.skills) or {}
+		info.AuraInfo = DeepCopy(paladin.auras) or {}
+		info.CooldownInfo = {
+			[1] = {start = 0, duration = 0},
+			[2] = {start = 0, duration = 0},
+		}
+		info.symbols = 200
+		info.freeassign = true
+		info.subgroup = paladin.subgroup or 1
+		_G.AllPallys[paladin.name] = info
+
+		_G.PallyPower_Assignments[paladin.name] = {}
+		for classID = 1, self:GetMaxClasses() do
+			_G.PallyPower_Assignments[paladin.name][classID] = 0
+		end
+		_G.PallyPower_NormalAssignments[paladin.name] = {}
+		_G.PallyPower_AuraAssignments[paladin.name] = 0
+		_G.SyncList[#_G.SyncList + 1] = paladin.name
+	end
+	table.sort(_G.SyncList)
+
+	if _G.PallyPower then
+		_G.PallyPower.player = context.playerName
+		if type(_G.PallyPower.opt) ~= "table" then
+			_G.PallyPower.opt = {}
+		end
+		_G.PallyPower.opt.freeassign = true
+	end
+	_G.PP_Leader = true
+end
+
+function PPA:InstallSimulationHooks()
+	local pallyPower = _G.PallyPower
+	if not pallyPower or self.simulationHooksInstalledFor == pallyPower then
+		return
+	end
+	self.simulationHooksInstalledFor = pallyPower
+
+	local function wrapWithSimulationAPIs(methodName)
+		local original = pallyPower[methodName]
+		if type(original) ~= "function" then
+			return
+		end
+		pallyPower[methodName] = function(target, ...)
+			if PPA:IsSimulationActive() then
+				local args = {...}
+				return PPA:WithSimulationUnitAPIs(function()
+					return original(target, unpack(args))
+				end)
+			end
+			return original(target, ...)
+		end
+	end
+
+	local function wrapNoopDuringSimulation(methodName)
+		local original = pallyPower[methodName]
+		if type(original) ~= "function" then
+			return
+		end
+		pallyPower[methodName] = function(target, ...)
+			if PPA:IsSimulationActive() then
+				return
+			end
+			return original(target, ...)
+		end
+	end
+
+	wrapWithSimulationAPIs("UpdateRoster")
+	wrapWithSimulationAPIs("AutoAssign")
+	wrapNoopDuringSimulation("UpdateAllPallys")
+	wrapNoopDuringSimulation("ScanSpells")
+	wrapNoopDuringSimulation("ScanCooldowns")
+	wrapNoopDuringSimulation("ScanInventory")
+	wrapNoopDuringSimulation("SendSelf")
+	wrapNoopDuringSimulation("SendMessage")
+end
+
+function PPA:OpenAssignmentFrame()
+	if not _G.PallyPower then
+		Print("PallyPower is required.")
+		return false
+	end
+	self:HookPallyPower()
+	local frame = _G.PallyPowerBlessingsFrame
+	if not frame then
+		Print("PallyPower's assignment frame is not available yet.")
+		return false
+	end
+
+	if _G.PallyPowerConfigFrame and _G.PallyPowerConfigFrame.IsShown and _G.PallyPowerConfigFrame:IsShown() then
+		_G.PallyPowerConfigFrame:Hide()
+	end
+	if frame.ClearAllPoints then
+		frame:ClearAllPoints()
+	end
+	if frame.SetPoint then
+		frame:SetPoint("CENTER", _G.UIParent or "UIParent", "CENTER", 0, 0)
+	end
+	if frame.Show then
+		frame:Show()
+	end
+	if type(_G.UISpecialFrames) == "table" then
+		local found = false
+		for _, name in ipairs(_G.UISpecialFrames) do
+			if name == "PallyPowerBlessingsFrame" then
+				found = true
+				break
+			end
+		end
+		if not found then
+			table.insert(_G.UISpecialFrames, "PallyPowerBlessingsFrame")
+		end
+	end
+	if _G.PallyPower.UpdateRoster then
+		_G.PallyPower:UpdateRoster()
+	elseif _G.PallyPower.UpdateLayout then
+		_G.PallyPower:UpdateLayout()
+	end
+	self:CreateSmartButton()
+	self:ReflowButtons()
+	return true
+end
+
+function PPA:ActivateSimulation(seed)
+	if _G.InCombatLockdown and _G.InCombatLockdown() then
+		Print("Simulation cannot start in combat.")
+		return false
+	end
+	if not _G.PallyPower then
+		Print("PallyPower is required.")
+		return false
+	end
+
+	self:InstallSimulationHooks()
+	local previous = self:IsSimulationActive() and self.simulation.previous or self:CapturePallyPowerState()
+	if not self:IsSimulationActive() then
+		self:SaveSimulationRestorePoint(previous)
+	end
+
+	local context = self:BuildSimulationContext(seed or self:GetNextSimulationSeed())
+	self.simulation = {
+		active = true,
+		context = context,
+		previous = previous,
+	}
+	self:PrepareSimulationUnitMaps(context)
+	self:SeedPallyPowerSimulation(context)
+	self:OpenAssignmentFrame()
+
+	local summary = context.simulationSummary or {}
+	Print(string.format(
+		"Simulation raid active: %d players, %d tanks, %d healers, %d DPS, %d paladins.",
+		#(context.players or {}),
+		SafeNumber(summary.tanks, 0),
+		SafeNumber(summary.healers, 0),
+		SafeNumber(summary.dps, 0),
+		SafeNumber(summary.paladins, 0)
+	))
+	Print("Run /ppa smart or click Smart-Assign. /ppa simulate off restores your previous PallyPower state.")
+	return true
+end
+
+function PPA:DeactivateSimulation()
+	if not self:IsSimulationActive() then
+		local restored = self:RestorePallyPowerState()
+		Print(restored and "Simulation state restored." or "No PPA simulation is active.")
+		return restored
+	end
+
+	local previous = self.simulation.previous
+	self.simulation = nil
+	local restored = self:RestorePallyPowerState(previous)
+	if _G.PallyPower then
+		if _G.PallyPower.ScanSpells then
+			pcall(_G.PallyPower.ScanSpells, _G.PallyPower)
+		end
+		if _G.PallyPower.ScanCooldowns then
+			pcall(_G.PallyPower.ScanCooldowns, _G.PallyPower)
+		end
+		if _G.PallyPower.ScanInventory then
+			pcall(_G.PallyPower.ScanInventory, _G.PallyPower)
+		end
+		if _G.PallyPower.UpdateRoster then
+			pcall(_G.PallyPower.UpdateRoster, _G.PallyPower)
+		elseif _G.PallyPower.UpdateLayout then
+			pcall(_G.PallyPower.UpdateLayout, _G.PallyPower)
+		end
+	end
+	Print(restored and "PPA simulation disabled and previous PallyPower state restored." or "PPA simulation disabled.")
+	return true
+end
+
 function PPA:AssignmentString(assignments)
 	local maxClasses = _G.PALLYPOWER_MAXCLASSES or 9
 	local parts = {}
@@ -1676,10 +2404,11 @@ function PPA:ApplyPlan(plan, context)
 		return false
 	end
 
-	if _G.PallyPower.ClearAssignments then
+	local simulation = context and context.simulation == true
+	if not simulation and _G.PallyPower.ClearAssignments then
 		_G.PallyPower:ClearAssignments(_G.PallyPower.player, true)
 	end
-	if _G.PallyPower.SendMessage then
+	if not simulation and _G.PallyPower.SendMessage then
 		_G.PallyPower:SendMessage("CLEAR SKIP")
 	end
 
@@ -1716,7 +2445,9 @@ function PPA:ApplyPlan(plan, context)
 	end
 
 	local function afterAssignments()
-		self:SendPlanMessages(plan)
+		if not simulation then
+			self:SendPlanMessages(plan)
+		end
 		if _G.PallyPower.UpdateRoster then
 			_G.PallyPower:UpdateRoster()
 		end
@@ -2083,6 +2814,7 @@ function PPA:HookPallyPower()
 		return
 	end
 	self:HookAssignmentAlerts()
+	self:InstallSimulationHooks()
 	if self.hookedPallyPower then
 		return
 	end
@@ -2098,6 +2830,8 @@ end
 
 function PPA:ShowHelp()
 	Print("/ppa smart - run Smart-Assign")
+	Print("/ppa simulate - open a local 25-player simulation raid")
+	Print("/ppa simulate off - restore the previous PallyPower state")
 	Print("/ppa debug - toggle debug reasoning")
 	Print("/ppa debug on - enable debug reasoning")
 	Print("/ppa debug off - disable debug reasoning")
@@ -2129,6 +2863,14 @@ function PPA:HandleSlash(input)
 	elseif input == "sound off" then
 		self:EnsureDB().buffWarningSound = false
 		Print("Buff warning sound disabled.")
+	elseif input == "simulate" or input == "simulate on" or input == "simulate reroll" or input == "simulate new" then
+		self:ActivateSimulation()
+	elseif input == "simulate off" or input == "simulate clear" or input == "simulate stop" then
+		self:DeactivateSimulation()
+	elseif input == "simulate smart" then
+		if self:ActivateSimulation() then
+			self:ExecuteSmartAssign({guess = true, noPrompt = true})
+		end
 	elseif input == "specs" or input == "assign specs" then
 		local context = self:BuildRuntimeContext(false)
 		self:ShowSpecFrame(self:GetUncertainPlayers(context))
@@ -2152,12 +2894,15 @@ function PPA:OnEvent(event, arg1)
 	if event == "ADDON_LOADED" then
 		if arg1 == addonName then
 			self:EnsureDB()
+			self:RestoreStaleSimulationState()
 			self:RegisterSlash()
 		elseif arg1 == "PallyPower" then
+			self:RestoreStaleSimulationState()
 			self:HookPallyPower()
 		end
 	elseif event == "PLAYER_LOGIN" then
 		self:EnsureDB()
+		self:RestoreStaleSimulationState()
 		self:RegisterSlash()
 		self:HookPallyPower()
 	end
@@ -2165,6 +2910,7 @@ end
 
 function PPA:Initialize()
 	self:EnsureDB()
+	self:RestoreStaleSimulationState()
 	self:RegisterSlash()
 	self:HookPallyPower()
 	if type(_G.CreateFrame) == "function" and not self.eventFrame then
@@ -2214,6 +2960,21 @@ PPA._test = {
 	end,
 	BuildRuntimeContext = function(guess)
 		return PPA:BuildRuntimeContext(guess)
+	end,
+	BuildSimulationContext = function(seed)
+		return PPA:BuildSimulationContext(seed)
+	end,
+	ActivateSimulation = function(seed)
+		return PPA:ActivateSimulation(seed)
+	end,
+	DeactivateSimulation = function()
+		return PPA:DeactivateSimulation()
+	end,
+	IsSimulationActive = function()
+		return PPA:IsSimulationActive()
+	end,
+	ApplyPlan = function(plan, context)
+		return PPA:ApplyPlan(plan, context)
 	end,
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)

@@ -617,6 +617,118 @@ test("expiring assigned blessings are detected from PallyPower assignments", fun
 	PPA.CollectRoster = old.CollectRoster
 end)
 
+test("simulation context creates a full raid with expected coverage", function()
+	local context = T.BuildSimulationContext(42)
+	local classes = {}
+	local roles = {TANK = 0, HEALER = 0, DAMAGER = 0}
+
+	assertEquals(#context.players, 25, "simulated raid size")
+	for _, unit in ipairs(context.players) do
+		classes[unit.class] = true
+		roles[unit.role] = (roles[unit.role] or 0) + 1
+		assertEquals(unit.unit, "raid" .. tostring(_), "simulated unit token")
+	end
+
+	assertEquals(roles.TANK >= 2 and roles.TANK <= 3, true, "simulated tank count")
+	assertEquals(roles.HEALER >= 4 and roles.HEALER <= 9, true, "simulated healer count")
+	assertEquals(roles.DAMAGER, 25 - roles.TANK - roles.HEALER, "simulated dps count")
+	for _, classFile in ipairs({"WARRIOR", "ROGUE", "PRIEST", "DRUID", "PALADIN", "HUNTER", "MAGE", "WARLOCK", "SHAMAN"}) do
+		assertEquals(classes[classFile], true, "simulated class coverage for " .. classFile)
+	end
+	assertEquals(context.pallyCount >= 3 and context.pallyCount <= 5, true, "simulated paladin count")
+	assertEquals(context.playerName, "PpaSimHoly", "simulated local paladin")
+	assertEquals(#T.GetUncertainPlayers(context), 0, "simulation should not prompt for specs")
+end)
+
+test("simulation context is auto-assignable", function()
+	local context = T.BuildSimulationContext(73)
+	local plan = T.BuildSmartPlan(context)
+
+	assertEquals(#plan.warnings, 0, "simulation should have paladins")
+	assertEquals(#plan.classPlans, 9, "simulation should plan every class")
+	assertEquals(plan.assignments.PpaSimHoly ~= nil, true, "local simulated paladin should receive assignments")
+	assertEquals(type(plan.auraAssignments.PpaSimHoly), "number", "local simulated paladin should receive an aura assignment")
+end)
+
+test("runtime context uses active simulation instead of live unit APIs", function()
+	local old = {
+		simulation = PPA.simulation,
+		IsInRaid = _G.IsInRaid,
+	}
+
+	PPA.simulation = {
+		active = true,
+		context = T.BuildSimulationContext(19),
+	}
+	_G.IsInRaid = function()
+		error("live raid API should not be called during simulation")
+	end
+
+	local context = T.BuildRuntimeContext(false)
+	assertEquals(context.simulation, true, "runtime context should stay marked as simulation")
+	assertEquals(#context.players, 25, "runtime simulation player count")
+	assertEquals(context.playerName, "PpaSimHoly", "runtime simulation player")
+
+	PPA.simulation = old.simulation
+	_G.IsInRaid = old.IsInRaid
+end)
+
+test("applying a simulation plan stays local and does not broadcast", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_AuraAssignments = _G.PallyPower_AuraAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		C_Timer = _G.C_Timer,
+	}
+	local messages = {}
+	local clears = 0
+	local updateRoster = 0
+	local updateLayout = 0
+
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.PallyPower_Assignments = {}
+	_G.PallyPower_NormalAssignments = {}
+	_G.PallyPower_AuraAssignments = {}
+	_G.C_Timer = {
+		After = function(_, callback)
+			callback()
+		end,
+	}
+	_G.PallyPower = {
+		player = "PpaSimHoly",
+		ClearAssignments = function()
+			clears = clears + 1
+		end,
+		SendMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+		UpdateRoster = function()
+			updateRoster = updateRoster + 1
+		end,
+		UpdateLayout = function()
+			updateLayout = updateLayout + 1
+		end,
+	}
+
+	local context = T.BuildSimulationContext(11)
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(T.ApplyPlan(plan, context), true, "simulation plan should apply")
+	assertEquals(clears, 0, "simulation should not clear via PallyPower broadcast path")
+	assertEquals(#messages, 0, "simulation should not broadcast assignments")
+	assertEquals(updateRoster, 1, "simulation should refresh roster")
+	assertEquals(updateLayout, 1, "simulation should refresh layout")
+	assertEquals(_G.PallyPower_Assignments.PpaSimHoly ~= nil, true, "simulation assignments should be written locally")
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_AuraAssignments = old.PallyPower_AuraAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.C_Timer = old.C_Timer
+end)
+
 local failures = 0
 for _, entry in ipairs(tests) do
 	local ok, err = pcall(entry.fn)
