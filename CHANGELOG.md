@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.1.17] - 2026-05-15
+
+### Fixed
+- Prot paladin tanks with confirmed spec data and no Sanctity Aura no longer receive a personal Blessing of Sanctuary override from the tank fallback pass; they already prefer Kings and the override was incorrectly replacing it.
+- Prot paladin tank priority now uses confirmed spec data exclusively when available, ignoring the pally-count heuristic: confirmed Sanctity Aura → Sanctuary first; confirmed no Sanctity Aura → Kings first regardless of raid size. The pally-count fallback remains for paladins with no PPA spec data.
+
+### Added
+- `GetUnitSpecData` helper consolidates local-player talent reads and peer spec cache lookups into one call.
+
+### Tests
+- Expand prot paladin priority test to cover all three cases: no spec data (pally-count heuristic), confirmed no Sanctity Aura (kings always first), confirmed Sanctity Aura (sanctuary always first).
+
 ## [0.1.16] - 2026-05-15
 
 ### Changed

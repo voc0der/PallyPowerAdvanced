@@ -103,23 +103,28 @@ test("warrior tank gets normal sanctuary instead of class salvation", function()
 	assertEquals(plan.normalAssignments.Tankadin[1].Shieldwall, T.BUFF_SANCTUARY, "warrior tank should receive sanctuary override")
 end)
 
-test("prot paladin with confirmed sanctity aura gets sanctuary before kings regardless of pally count", function()
+test("prot paladin priority uses confirmed spec data over pally count heuristic", function()
 	local tankadin = {name = "Tankadin", class = "PALADIN", classID = 5, role = "TANK"}
 
-	-- Low pally count without sanctity aura: kings comes first
+	-- No spec data: falls back to pally count heuristic
 	local priority = T.GetPriorityForUnit(tankadin, {pallyCount = 2})
-	assertEquals(priority[1], T.BUFF_KINGS, "without sanctity aura at low pally count, kings first")
+	assertEquals(priority[1], T.BUFF_KINGS, "no spec data, low pally count: kings first")
+	priority = T.GetPriorityForUnit(tankadin, {pallyCount = 5})
+	assertEquals(priority[1], T.BUFF_SANCTUARY, "no spec data, high pally count: sanctuary first")
 
-	-- Low pally count with confirmed sanctity aura + holy shield: sanctuary comes first
+	-- Confirmed no Sanctity Aura: kings always first regardless of pally count
+	PPA.peerSpecs["Tankadin"] = {activeTab = 2, sanctityAura = 0, holyShield = 1, impSanc = 2, kings = 1, impMight = 0, impWisdom = 0}
+	priority = T.GetPriorityForUnit(tankadin, {pallyCount = 5})
+	assertEquals(priority[1], T.BUFF_KINGS, "confirmed no sanctity aura, high pally count: kings first")
+	assertEquals(priority[2], T.BUFF_SANCTUARY, "confirmed no sanctity aura: sanctuary second")
+
+	-- Confirmed Sanctity Aura: sanctuary always first regardless of pally count
 	PPA.peerSpecs["Tankadin"] = {activeTab = 2, sanctityAura = 1, holyShield = 1, impSanc = 2, kings = 1, impMight = 0, impWisdom = 0}
 	priority = T.GetPriorityForUnit(tankadin, {pallyCount = 2})
-	assertEquals(priority[1], T.BUFF_SANCTUARY, "with sanctity aura at low pally count, sanctuary first")
-	assertEquals(priority[2], T.BUFF_KINGS, "with sanctity aura, kings second")
-
-	-- High pally count with confirmed sanctity aura: sanctuary still first
+	assertEquals(priority[1], T.BUFF_SANCTUARY, "confirmed sanctity aura, low pally count: sanctuary first")
+	assertEquals(priority[2], T.BUFF_KINGS, "confirmed sanctity aura: kings second")
 	priority = T.GetPriorityForUnit(tankadin, {pallyCount = 5})
-	assertEquals(priority[1], T.BUFF_SANCTUARY, "with sanctity aura at high pally count, sanctuary first")
-	assertEquals(priority[2], T.BUFF_KINGS, "with sanctity aura at high pally count, kings second")
+	assertEquals(priority[1], T.BUFF_SANCTUARY, "confirmed sanctity aura, high pally count: sanctuary first")
 
 	PPA.peerSpecs["Tankadin"] = nil
 end)

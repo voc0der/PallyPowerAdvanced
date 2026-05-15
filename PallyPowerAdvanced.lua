@@ -479,11 +479,12 @@ function PPA:GetPriorityForUnit(unit, context)
 			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 		elseif role == ROLE_TANK then
-			local peer = self.peerSpecs[unit.name]
-			local hasSanctityAura = peer and (peer.sanctityAura or 0) > 0
-			local hasHolyShield   = peer and (peer.holyShield   or 0) > 0
-			if hasSanctityAura and (hasHolyShield or role == ROLE_TANK) then
-				return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_KINGS, BUFF_LIGHT, BUFF_WISDOM, BUFF_MIGHT)
+			local specData = self:GetUnitSpecData(unit.name)
+			if specData then
+				if (specData.sanctityAura or 0) > 0 then
+					return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_KINGS, BUFF_LIGHT, BUFF_WISDOM, BUFF_MIGHT)
+				end
+				return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_LIGHT, BUFF_MIGHT)
 			end
 			if (context and context.pallyCount or 0) <= 2 then
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_LIGHT, BUFF_MIGHT)
@@ -1220,17 +1221,26 @@ function PPA:ApplyTankSanctuaryFallbacks(context, classID, members, selected, pl
 
 	for _, unit in ipairs(members or {}) do
 		if NormalizeRole(unit.role) == ROLE_TANK and not PlanHasNormalBuff(plan, classID, unit.name, BUFF_SANCTUARY) then
-			local priority = unit.priority or self:GetPriorityForUnit(unit, context)
-			if PriorityIndex(priority, BUFF_SANCTUARY) then
-				local paladin = self:FindBestPaladinForUnassignedNormal(context, BUFF_SANCTUARY)
-				if paladin then
-					SetPlanNormal(plan, paladin, classID, unit.name, BUFF_SANCTUARY, 0)
-					plan.debugLines[#plan.debugLines + 1] = string.format(
-						"%s: %s adds single-target %s for tank coverage.",
-						unit.name,
-						paladin.name,
-						BuffText(BUFF_SANCTUARY)
-					)
+			local skipSanctuary = false
+			if unit.class == "PALADIN" then
+				local specData = self:GetUnitSpecData(unit.name)
+				if specData and (specData.sanctityAura or 0) == 0 then
+					skipSanctuary = true
+				end
+			end
+			if not skipSanctuary then
+				local priority = unit.priority or self:GetPriorityForUnit(unit, context)
+				if PriorityIndex(priority, BUFF_SANCTUARY) then
+					local paladin = self:FindBestPaladinForUnassignedNormal(context, BUFF_SANCTUARY)
+					if paladin then
+						SetPlanNormal(plan, paladin, classID, unit.name, BUFF_SANCTUARY, 0)
+						plan.debugLines[#plan.debugLines + 1] = string.format(
+							"%s: %s adds single-target %s for tank coverage.",
+							unit.name,
+							paladin.name,
+							BuffText(BUFF_SANCTUARY)
+						)
+					end
 				end
 			end
 		end
@@ -1991,6 +2001,14 @@ function PPA:BroadcastSpec()
 		return
 	end
 	C_ChatInfo.SendAddonMessage(PPA_SPEC_PREFIX, msg, channel)
+end
+
+function PPA:GetUnitSpecData(unitName)
+	local UnitName = _G.UnitName
+	if type(UnitName) == "function" and unitName == UnitName("player") then
+		return self:ReadLocalTalents()
+	end
+	return self.peerSpecs[unitName]
 end
 
 function PPA:HandleAddonMessage(prefix, text, _, sender)
