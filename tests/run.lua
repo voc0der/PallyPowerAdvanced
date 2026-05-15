@@ -21,6 +21,16 @@ local function skill(rank, talent)
 	return {rank = rank or 1, talent = talent or 0}
 end
 
+local function collectClassBuffs(plan, classID)
+	local buffs = {}
+	for _, classMap in pairs(plan.assignments or {}) do
+		if classMap[classID] then
+			buffs[classMap[classID]] = true
+		end
+	end
+	return buffs
+end
+
 local function baseContext()
 	return {
 		playerName = "Holyone",
@@ -90,7 +100,7 @@ test("elemental shaman damage prefers wisdom where enhancement prefers might", f
 	assertEquals(T.GetPriorityForUnit(enhancement, context)[3], T.BUFF_MIGHT, "enhancement third priority")
 end)
 
-test("physical and caster classes leave useless filler blessings blank", function()
+test("physical and caster classes keep useful late blessings without useless fillers", function()
 	local context = {
 		playerName = "Holyone",
 		pallyCount = 5,
@@ -113,23 +123,19 @@ test("physical and caster classes leave useless filler blessings blank", functio
 	}
 
 	local plan = T.BuildSmartPlan(context)
-	local warriorAssignments = 0
-	local rogueAssignments = 0
 	for _, classMap in pairs(plan.assignments) do
-		if classMap[1] then
-			warriorAssignments = warriorAssignments + 1
-		end
-		if classMap[2] then
-			rogueAssignments = rogueAssignments + 1
-		end
 		assertEquals(classMap[1] == T.BUFF_WISDOM, false, "warriors should not receive wisdom filler")
 		assertEquals(classMap[2] == T.BUFF_WISDOM, false, "rogues should not receive wisdom filler")
 		assertEquals(classMap[3] == T.BUFF_MIGHT, false, "priests should not receive might filler")
 		assertEquals(classMap[7] == T.BUFF_MIGHT, false, "mages should not receive might filler")
 		assertEquals(classMap[8] == T.BUFF_MIGHT, false, "warlocks should not receive might filler")
 	end
-	assertEquals(warriorAssignments <= 3, true, "DPS warriors should leave extra paladin slots blank")
-	assertEquals(rogueAssignments <= 3, true, "rogues should leave extra paladin slots blank")
+	local warriorBuffs = collectClassBuffs(plan, 1)
+	local rogueBuffs = collectClassBuffs(plan, 2)
+	assertEquals(warriorBuffs[T.BUFF_LIGHT], true, "DPS warriors should receive blessing of light when slots allow")
+	assertEquals(warriorBuffs[T.BUFF_SANCTUARY], true, "DPS warriors should receive sanctuary when slots allow")
+	assertEquals(rogueBuffs[T.BUFF_LIGHT], true, "rogues should receive blessing of light when slots allow")
+	assertEquals(rogueBuffs[T.BUFF_SANCTUARY], true, "rogues should receive sanctuary when slots allow")
 end)
 
 test("improved might ret paladin is preferred for might", function()
@@ -745,6 +751,45 @@ test("simulation context creates a full raid with expected coverage", function()
 	assertEquals(paladinNames.PpaSimProt1, true, "simulation should include a prot paladin")
 	assertEquals(paladinNames.PpaSimRet1, true, "simulation should include a ret paladin")
 	assertEquals(#T.GetUncertainPlayers(context), 0, "simulation should not prompt for specs")
+end)
+
+test("simulation names identify ambiguous roles and specs", function()
+	local context = T.BuildSimulationContext(1)
+	local sawTankWar = false
+	local sawDpsWar = false
+	local sawFeralDruid = false
+	local sawBalanceDruid = false
+	local sawRestoShaman = false
+	local sawEleShaman = false
+
+	for _, unit in ipairs(context.players) do
+		if unit.class == "WARRIOR" and unit.role == "TANK" then
+			assertEquals(string.find(unit.name, "TankWar") ~= nil, true, "tank warrior name")
+			sawTankWar = true
+		elseif unit.class == "WARRIOR" and unit.role == "DAMAGER" then
+			assertEquals(string.find(unit.name, "DpsWar") ~= nil, true, "DPS warrior name")
+			sawDpsWar = true
+		elseif unit.class == "DRUID" and unit.spec == "FERAL" then
+			assertEquals(string.find(unit.name, "FeralDruid") ~= nil, true, "feral druid name")
+			sawFeralDruid = true
+		elseif unit.class == "DRUID" and unit.spec == "BALANCE" then
+			assertEquals(string.find(unit.name, "BalanceDruid") ~= nil, true, "balance druid name")
+			sawBalanceDruid = true
+		elseif unit.class == "SHAMAN" and unit.role == "HEALER" then
+			assertEquals(string.find(unit.name, "RestoShaman") ~= nil, true, "restoration shaman name")
+			sawRestoShaman = true
+		elseif unit.class == "SHAMAN" and unit.spec == "ELEMENTAL" then
+			assertEquals(string.find(unit.name, "EleShaman") ~= nil, true, "elemental shaman name")
+			sawEleShaman = true
+		end
+	end
+
+	assertEquals(sawTankWar, true, "seed should include a tank warrior")
+	assertEquals(sawDpsWar, true, "seed should include a DPS warrior")
+	assertEquals(sawFeralDruid, true, "seed should include a feral druid")
+	assertEquals(sawBalanceDruid, true, "seed should include a balance druid")
+	assertEquals(sawRestoShaman, true, "seed should include a restoration shaman")
+	assertEquals(sawEleShaman, true, "seed should include an elemental shaman")
 end)
 
 test("simulation context is auto-assignable", function()

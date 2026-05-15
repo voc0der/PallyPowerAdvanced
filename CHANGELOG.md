@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.1.12] - 2026-05-15
+
+### Fixed
+- Restore Blessing of Light and Blessing of Sanctuary as useful late-slot options for DPS warriors and rogues when enough paladins are available, while still blocking Wisdom filler for those classes.
+- Make simulated warrior and hybrid class names include role/spec context so tank warriors and caster/melee hybrid specs are clear in the assignment screen.
+
+### Tests
+- Add coverage for physical class late-slot Light/Sanctuary assignments and role/spec-aware simulation names.
+
 ## [0.1.11] - 2026-05-15
 
 ### Fixed

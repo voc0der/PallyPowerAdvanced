@@ -441,9 +441,9 @@ function PPA:GetPriorityForUnit(unit, context)
 		if role == ROLE_TANK then
 			return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_LIGHT, BUFF_MIGHT)
 		end
-		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT)
+		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "ROGUE" then
-		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_MIGHT, BUFF_KINGS)
+		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_MIGHT, BUFF_KINGS, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "PRIEST" then
 		if role == ROLE_HEALER then
 			if not improvedWisdom then
@@ -1683,6 +1683,44 @@ local SIMULATION_PALADIN_NAMES = {
 	NONE = "Ret",
 }
 
+local function SimulationNameBase(classFile, role, spec)
+	role = NormalizeRole(role)
+	if classFile == "PALADIN" then
+		return SIMULATION_PALADIN_NAMES[role] or SIMULATION_PALADIN_NAMES.DAMAGER
+	elseif classFile == "WARRIOR" then
+		if role == ROLE_TANK then
+			return "TankWar"
+		elseif role == ROLE_DAMAGER then
+			return "DpsWar"
+		end
+	elseif classFile == "PRIEST" then
+		if role == ROLE_HEALER then
+			return "HolyPriest"
+		elseif spec == "SHADOW" or role == ROLE_DAMAGER then
+			return "ShadowPriest"
+		end
+	elseif classFile == "DRUID" then
+		if role == ROLE_TANK then
+			return "TankDruid"
+		elseif role == ROLE_HEALER then
+			return "RestoDruid"
+		elseif spec == "BALANCE" then
+			return "BalanceDruid"
+		elseif spec == "FERAL" then
+			return "FeralDruid"
+		end
+	elseif classFile == "SHAMAN" then
+		if role == ROLE_HEALER then
+			return "RestoShaman"
+		elseif spec == "ELEMENTAL" then
+			return "EleShaman"
+		elseif spec == "ENHANCEMENT" then
+			return "EnhShaman"
+		end
+	end
+	return SIMULATION_BASE_NAMES[classFile] or classFile
+end
+
 local function CreateSimulationRng(seed)
 	local state = SafeNumber(seed, 1)
 	if state <= 0 then
@@ -1780,16 +1818,11 @@ function PPA:BuildSimulationContext(seed)
 	}
 	local nameCounts = {}
 
-	local function nextName(classFile, role)
-		if classFile == "PALADIN" then
-			local paladinRole = NormalizeRole(role)
-			local base = SIMULATION_PALADIN_NAMES[paladinRole] or SIMULATION_PALADIN_NAMES.DAMAGER
-			local key = classFile .. "_" .. paladinRole
-			nameCounts[key] = (nameCounts[key] or 0) + 1
-			return "PpaSim" .. base .. tostring(nameCounts[key])
-		end
-		nameCounts[classFile] = (nameCounts[classFile] or 0) + 1
-		return "PpaSim" .. (SIMULATION_BASE_NAMES[classFile] or classFile) .. tostring(nameCounts[classFile])
+	local function nextName(classFile, role, spec)
+		local base = SimulationNameBase(classFile, role, spec)
+		local key = classFile .. "_" .. base
+		nameCounts[key] = (nameCounts[key] or 0) + 1
+		return "PpaSim" .. base .. tostring(nameCounts[key])
 	end
 
 	local function addPlayer(classFile, role, spec, name)
@@ -1799,10 +1832,10 @@ function PPA:BuildSimulationContext(seed)
 		end
 		if name and classFile == "PALADIN" then
 			local paladinRole = NormalizeRole(role)
-			local key = classFile .. "_" .. paladinRole
+			local key = classFile .. "_" .. SimulationNameBase(classFile, paladinRole, spec)
 			nameCounts[key] = math.max(nameCounts[key] or 0, 1)
 		end
-		name = name or nextName(classFile, role)
+		name = name or nextName(classFile, role, spec)
 		local unit = {
 			name = name,
 			fullName = name,
