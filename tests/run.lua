@@ -90,6 +90,48 @@ test("elemental shaman damage prefers wisdom where enhancement prefers might", f
 	assertEquals(T.GetPriorityForUnit(enhancement, context)[3], T.BUFF_MIGHT, "enhancement third priority")
 end)
 
+test("physical and caster classes leave useless filler blessings blank", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 5,
+		healingPaladinPresent = true,
+		improvedWisdomPaladinPresent = true,
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Tankadin", role = "TANK", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4), [T.BUFF_SANCTUARY] = skill(5, 2)}},
+			{name = "Retone", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Rettwo", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Holytwo", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+		},
+		players = {
+			{name = "Slammer", class = "WARRIOR", classID = 1, role = "DAMAGER"},
+			{name = "Sneaky", class = "ROGUE", classID = 2, role = "DAMAGER"},
+			{name = "Prayer", class = "PRIEST", classID = 3, role = "HEALER"},
+			{name = "Frostbolt", class = "MAGE", classID = 7, role = "DAMAGER"},
+			{name = "Dotdot", class = "WARLOCK", classID = 8, role = "DAMAGER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	local warriorAssignments = 0
+	local rogueAssignments = 0
+	for _, classMap in pairs(plan.assignments) do
+		if classMap[1] then
+			warriorAssignments = warriorAssignments + 1
+		end
+		if classMap[2] then
+			rogueAssignments = rogueAssignments + 1
+		end
+		assertEquals(classMap[1] == T.BUFF_WISDOM, false, "warriors should not receive wisdom filler")
+		assertEquals(classMap[2] == T.BUFF_WISDOM, false, "rogues should not receive wisdom filler")
+		assertEquals(classMap[3] == T.BUFF_MIGHT, false, "priests should not receive might filler")
+		assertEquals(classMap[7] == T.BUFF_MIGHT, false, "mages should not receive might filler")
+		assertEquals(classMap[8] == T.BUFF_MIGHT, false, "warlocks should not receive might filler")
+	end
+	assertEquals(warriorAssignments <= 3, true, "DPS warriors should leave extra paladin slots blank")
+	assertEquals(rogueAssignments <= 3, true, "rogues should leave extra paladin slots blank")
+end)
+
 test("uncertain damage druid and shaman are reported for manual choice", function()
 	local context = {
 		players = {
@@ -621,11 +663,16 @@ test("simulation context creates a full raid with expected coverage", function()
 	local context = T.BuildSimulationContext(42)
 	local classes = {}
 	local roles = {TANK = 0, HEALER = 0, DAMAGER = 0}
+	local paladinNames = {}
 
 	assertEquals(#context.players, 25, "simulated raid size")
 	for _, unit in ipairs(context.players) do
 		classes[unit.class] = true
 		roles[unit.role] = (roles[unit.role] or 0) + 1
+		if unit.class == "PALADIN" then
+			paladinNames[unit.name] = true
+			assertEquals(string.find(unit.name, "PpaSimPally") == nil, true, "simulated paladin names should include role")
+		end
 		assertEquals(unit.unit, "raid" .. tostring(_), "simulated unit token")
 	end
 
@@ -637,6 +684,9 @@ test("simulation context creates a full raid with expected coverage", function()
 	end
 	assertEquals(context.pallyCount >= 3 and context.pallyCount <= 5, true, "simulated paladin count")
 	assertEquals(context.playerName, "PpaSimHoly", "simulated local paladin")
+	assertEquals(paladinNames.PpaSimHoly, true, "simulation should include a holy paladin")
+	assertEquals(paladinNames.PpaSimProt1, true, "simulation should include a prot paladin")
+	assertEquals(paladinNames.PpaSimRet1, true, "simulation should include a ret paladin")
 	assertEquals(#T.GetUncertainPlayers(context), 0, "simulation should not prompt for specs")
 end)
 
@@ -648,6 +698,35 @@ test("simulation context is auto-assignable", function()
 	assertEquals(#plan.classPlans, 9, "simulation should plan every class")
 	assertEquals(plan.assignments.PpaSimHoly ~= nil, true, "local simulated paladin should receive assignments")
 	assertEquals(type(plan.auraAssignments.PpaSimHoly), "number", "local simulated paladin should receive an aura assignment")
+end)
+
+test("simulation prot paladin provides blessing of sanctuary", function()
+	local context = T.BuildSimulationContext(73)
+	local protName
+	for _, paladin in ipairs(context.paladins) do
+		if paladin.name == "PpaSimProt1" then
+			protName = paladin.name
+			assertEquals(paladin.role, "TANK", "prot paladin role")
+			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_SANCTUARY), true, "prot paladin can cast sanctuary")
+		end
+	end
+	assertEquals(protName, "PpaSimProt1", "simulation should include prot paladin")
+
+	local plan = T.BuildSmartPlan(context)
+	local protProvidesSanctuary = false
+	for _, buff in pairs(plan.assignments[protName] or {}) do
+		if buff == T.BUFF_SANCTUARY then
+			protProvidesSanctuary = true
+		end
+	end
+	for _, targets in pairs(plan.normalAssignments[protName] or {}) do
+		for _, buff in pairs(targets or {}) do
+			if buff == T.BUFF_SANCTUARY then
+				protProvidesSanctuary = true
+			end
+		end
+	end
+	assertEquals(protProvidesSanctuary, true, "prot paladin should provide sanctuary")
 end)
 
 test("runtime context uses active simulation instead of live unit APIs", function()

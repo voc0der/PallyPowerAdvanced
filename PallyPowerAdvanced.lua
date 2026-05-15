@@ -431,11 +431,11 @@ function PPA:GetPriorityForUnit(unit, context)
 
 	if class == "WARRIOR" then
 		if role == ROLE_TANK then
-			return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_LIGHT, BUFF_MIGHT, BUFF_WISDOM)
+			return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_LIGHT, BUFF_MIGHT)
 		end
-		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
+		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT)
 	elseif class == "ROGUE" then
-		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_MIGHT, BUFF_KINGS, BUFF_LIGHT, BUFF_SANCTUARY)
+		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_MIGHT, BUFF_KINGS)
 	elseif class == "PRIEST" then
 		if role == ROLE_HEALER then
 			if not improvedWisdom then
@@ -679,6 +679,29 @@ local function GroupPlayersByClass(players)
 	return groups
 end
 
+local CLASS_DISALLOWED_BUFFS = {
+	[CLASS_ID.WARRIOR] = {
+		[BUFF_WISDOM] = true,
+	},
+	[CLASS_ID.ROGUE] = {
+		[BUFF_WISDOM] = true,
+	},
+	[CLASS_ID.PRIEST] = {
+		[BUFF_MIGHT] = true,
+	},
+	[CLASS_ID.MAGE] = {
+		[BUFF_MIGHT] = true,
+	},
+	[CLASS_ID.WARLOCK] = {
+		[BUFF_MIGHT] = true,
+	},
+}
+
+local function IsBuffAllowedForClass(classID, buff)
+	local disallowed = CLASS_DISALLOWED_BUFFS[classID]
+	return not (disallowed and disallowed[buff])
+end
+
 function PPA:CreateAssumedClassMember(classID)
 	local classFile = CLASS_FILES_BY_ID[classID]
 	if not classFile then
@@ -702,11 +725,13 @@ function PPA:ScoreClassBuffs(members, context)
 		local priority = self:GetPriorityForUnit(unit, context)
 		unit.priority = priority
 		for index, buff in ipairs(priority) do
-			local points = (#priority - index + 1) * 10
-			if index == 1 then
-				points = points + 8
+			if IsBuffAllowedForClass(unit.classID, buff) then
+				local points = (#priority - index + 1) * 10
+				if index == 1 then
+					points = points + 8
+				end
+				scores[buff] = (scores[buff] or 0) + points
 			end
-			scores[buff] = (scores[buff] or 0) + points
 		end
 	end
 	return scores
@@ -775,6 +800,61 @@ function PPA:FindReplacementBuff(paladin, priority, provided, currentBuff)
 		end
 	end
 	return nil
+end
+
+local function PlanHasNormalBuff(plan, classID, targetName, buff)
+	for _, classMap in pairs(plan.normalAssignments or {}) do
+		local targets = classMap and classMap[classID]
+		if targets and targets[targetName] == buff then
+			return true
+		end
+	end
+	return false
+end
+
+function PPA:FindBestPaladinForUnassignedNormal(context, buff, usedPaladins)
+	local bestPaladin
+	local bestScore = -100000
+	for _, paladin in ipairs(context.paladins or {}) do
+		if not (usedPaladins and usedPaladins[paladin.name]) and self:CanPaladinBuff(paladin, buff) then
+			local score = self:ScorePaladinForBuff(paladin, buff)
+			if score > bestScore or (score == bestScore and paladin.name < (bestPaladin and bestPaladin.name or "\255")) then
+				bestScore = score
+				bestPaladin = paladin
+			end
+		end
+	end
+	return bestPaladin
+end
+
+function PPA:ApplyTankSanctuaryFallbacks(context, classID, members, selected, plan)
+	local provided = {}
+	local usedPaladins = {}
+	for _, assignment in ipairs(selected or {}) do
+		provided[assignment.buff] = assignment.paladin.name
+		usedPaladins[assignment.paladin.name] = true
+	end
+	if provided[BUFF_SANCTUARY] then
+		return
+	end
+
+	for _, unit in ipairs(members or {}) do
+		if NormalizeRole(unit.role) == ROLE_TANK and not PlanHasNormalBuff(plan, classID, unit.name, BUFF_SANCTUARY) then
+			local priority = unit.priority or self:GetPriorityForUnit(unit, context)
+			if PriorityIndex(priority, BUFF_SANCTUARY) then
+				local paladin = self:FindBestPaladinForUnassignedNormal(context, BUFF_SANCTUARY, usedPaladins)
+				if paladin then
+					SetPlanNormal(plan, paladin, classID, unit.name, BUFF_SANCTUARY, 0)
+					plan.debugLines[#plan.debugLines + 1] = string.format(
+						"%s: %s adds single-target %s for tank coverage.",
+						unit.name,
+						paladin.name,
+						BuffText(BUFF_SANCTUARY)
+					)
+				end
+			end
+		end
+	end
 end
 
 function PPA:ApplyPlayerOverrides(context, classID, members, selected, plan)
@@ -959,6 +1039,7 @@ function PPA:BuildSmartPlan(context)
 
 			if not assumed then
 				self:ApplyPlayerOverrides(context, classID, members, selected, plan)
+				self:ApplyTankSanctuaryFallbacks(context, classID, members, selected, plan)
 			end
 		end
 	end
@@ -1499,11 +1580,17 @@ local SIMULATION_BASE_NAMES = {
 	ROGUE = "Rogue",
 	PRIEST = "Priest",
 	DRUID = "Druid",
-	PALADIN = "Pally",
 	HUNTER = "Hunter",
 	MAGE = "Mage",
 	WARLOCK = "Lock",
 	SHAMAN = "Shaman",
+}
+
+local SIMULATION_PALADIN_NAMES = {
+	TANK = "Prot",
+	HEALER = "Holy",
+	DAMAGER = "Ret",
+	NONE = "Ret",
 }
 
 local function CreateSimulationRng(seed)
@@ -1605,7 +1692,14 @@ function PPA:BuildSimulationContext(seed)
 	}
 	local nameCounts = {}
 
-	local function nextName(classFile)
+	local function nextName(classFile, role)
+		if classFile == "PALADIN" then
+			local paladinRole = NormalizeRole(role)
+			local base = SIMULATION_PALADIN_NAMES[paladinRole] or SIMULATION_PALADIN_NAMES.DAMAGER
+			local key = classFile .. "_" .. paladinRole
+			nameCounts[key] = (nameCounts[key] or 0) + 1
+			return "PpaSim" .. base .. tostring(nameCounts[key])
+		end
 		nameCounts[classFile] = (nameCounts[classFile] or 0) + 1
 		return "PpaSim" .. (SIMULATION_BASE_NAMES[classFile] or classFile) .. tostring(nameCounts[classFile])
 	end
@@ -1615,7 +1709,12 @@ function PPA:BuildSimulationContext(seed)
 		if not classID then
 			return nil
 		end
-		name = name or nextName(classFile)
+		if name and classFile == "PALADIN" then
+			local paladinRole = NormalizeRole(role)
+			local key = classFile .. "_" .. paladinRole
+			nameCounts[key] = math.max(nameCounts[key] or 0, 1)
+		end
+		name = name or nextName(classFile, role)
 		local unit = {
 			name = name,
 			fullName = name,
@@ -1649,6 +1748,8 @@ function PPA:BuildSimulationContext(seed)
 
 	addPlayer("PALADIN", ROLE_HEALER, nil, SIMULATION_LOCAL_PALADIN)
 	addPlayer("WARRIOR", ROLE_TANK)
+	addPlayer("PALADIN", ROLE_TANK)
+	addPlayer("PALADIN", ROLE_DAMAGER)
 	addPlayer("PRIEST", ROLE_HEALER)
 	addPlayer("DRUID", ROLE_DAMAGER, SimulationDpsSpec("DRUID", rng))
 	addPlayer("ROGUE", ROLE_DAMAGER)

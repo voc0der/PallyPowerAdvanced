@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## [0.1.9] - 2026-05-15
+
+### Changed
+- Stop using Wisdom as filler for warriors and rogues; extra paladin slots now stay blank for DPS warriors and rogues once useful blessings are covered.
+- Prevent Might from being selected as filler for priests, mages, and warlocks.
+- Ensure available Prot paladins provide Blessing of Sanctuary for tank coverage.
+- Rename simulated paladins by role, such as `PpaSimProt1` and `PpaSimRet1`, instead of generic `PpaSimPally` names.
+
+### Tests
+- Add coverage for useless filler blessing exclusions, role-specific simulated paladin names, and Prot paladin Sanctuary assignment.
+
 ## [0.1.8] - 2026-05-15
 
 ### Fixed

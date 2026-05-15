@@ -12,7 +12,7 @@
 - Alerts you when another paladin changes your assignments
 - Plays a one-minute warning sound when one of your assigned blessings is about to expire
 
-Current version: `0.1.8`
+Current version: `0.1.9`
 
 ## Smart Assign
 
@@ -28,6 +28,7 @@ Current version: `0.1.8`
 
 - `/ppa simulate`: Open PallyPower's assignment screen with a local-only 25-player simulated raid
 - Simulated raids include every TBC class, 2-3 tanks, 4-9 healers, DPS fill, and 3-5 paladins with fake PallyPower skill data
+- Simulated paladins are named by role, including Holy, Prot, and Ret paladins
 - While simulation is active, assignment messages are not broadcast
 - `/ppa smart`: Run Smart-Assign against the simulated raid
 - `/ppa simulate off`: Restore the previous PallyPower assignment state
