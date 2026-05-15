@@ -875,6 +875,93 @@ test("runtime context uses active simulation instead of live unit APIs", functio
 	_G.IsInRaid = old.IsInRaid
 end)
 
+test("simulation PallyPower hooks do not replace live unit APIs", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		simulation = PPA.simulation,
+		simulationHooksInstalledFor = PPA.simulationHooksInstalledFor,
+		IsInRaid = _G.IsInRaid,
+		GetRaidRosterInfo = _G.GetRaidRosterInfo,
+	}
+	local updateRosterCalls = 0
+	local autoAssignCalls = 0
+
+	_G.IsInRaid = function()
+		return false
+	end
+	local liveIsInRaid = _G.IsInRaid
+	_G.GetRaidRosterInfo = function()
+		error("live roster API should not be called by simulation hooks")
+	end
+	_G.PallyPower = {
+		UpdateRoster = function()
+			updateRosterCalls = updateRosterCalls + 1
+		end,
+		AutoAssign = function()
+			autoAssignCalls = autoAssignCalls + 1
+		end,
+	}
+	PPA.simulationHooksInstalledFor = nil
+	PPA:InstallSimulationHooks()
+	PPA.simulation = {
+		active = true,
+		context = T.BuildSimulationContext(23),
+	}
+
+	_G.PallyPower:UpdateRoster()
+	_G.PallyPower:AutoAssign()
+	assertEquals(updateRosterCalls, 0, "simulation should skip live PallyPower roster refresh")
+	assertEquals(autoAssignCalls, 0, "simulation should skip live PallyPower auto assign")
+	assertEquals(_G.IsInRaid, liveIsInRaid, "unit API global should remain assigned")
+
+	PPA.simulation = nil
+	_G.PallyPower:UpdateRoster()
+	_G.PallyPower:AutoAssign()
+	assertEquals(updateRosterCalls, 1, "normal roster refresh should still call original")
+	assertEquals(autoAssignCalls, 1, "normal auto assign should still call original")
+
+	_G.PallyPower = old.PallyPower
+	PPA.simulation = old.simulation
+	PPA.simulationHooksInstalledFor = old.simulationHooksInstalledFor
+	_G.IsInRaid = old.IsInRaid
+	_G.GetRaidRosterInfo = old.GetRaidRosterInfo
+end)
+
+test("simulation unit API shim refuses live client globals", function()
+	local old = {
+		simulation = PPA.simulation,
+		CreateFrame = _G.CreateFrame,
+		UIParent = _G.UIParent,
+		IsInRaid = _G.IsInRaid,
+	}
+
+	PPA.simulation = {
+		active = true,
+		context = T.BuildSimulationContext(29),
+	}
+	_G.CreateFrame = function()
+	end
+	_G.UIParent = {}
+	_G.IsInRaid = function()
+		return false
+	end
+	local liveIsInRaid = _G.IsInRaid
+
+	local ok, err = pcall(function()
+		T.WithSimulationUnitAPIs(function()
+			error("callback should not run in live-client mode")
+		end)
+	end)
+	assertEquals(ok, false, "live-client simulation unit shim should fail closed")
+	assertEquals(string.find(tostring(err), "avoid UI taint") ~= nil, true, "taint guard error")
+	assertEquals(_G.IsInRaid, liveIsInRaid, "unit API global should not be replaced by failed shim")
+
+	PPA.simulation = old.simulation
+	_G.CreateFrame = old.CreateFrame
+	_G.UIParent = old.UIParent
+	_G.IsInRaid = old.IsInRaid
+end)
+
 test("simulation unit APIs support PallyPower string raid roster indexes", function()
 	local old = {
 		simulation = PPA.simulation,

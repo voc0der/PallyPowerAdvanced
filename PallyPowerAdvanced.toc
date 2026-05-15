@@ -2,7 +2,7 @@
 ## Title: PallyPowerAdvanced
 ## Notes: Adds role/spec-aware Smart-Assign blessing plans to PallyPower for TBC Anniversary Classic.
 ## Author: voc0der
-## Version: 0.1.12
+## Version: 0.1.13
 ## X-Website: https://github.com/voc0der/PallyPowerAdvanced
 ## X-Curse-Project-ID: 1543077
 ## Dependencies: PallyPower

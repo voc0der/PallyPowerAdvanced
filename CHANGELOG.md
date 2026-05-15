@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.13] - 2026-05-15
+
+### Fixed
+- Avoid simulation-mode UI taint by no longer overriding Blizzard unit API globals in-game; simulated PallyPower roster refreshes now rely on seeded data and layout refreshes only.
+
+### Tests
+- Add coverage that simulation hooks do not replace live unit APIs and that the old simulation unit API shim fails closed in the WoW UI.
+
 ## [0.1.12] - 2026-05-15
 
 ### Fixed

@@ -262,6 +262,10 @@ local function ClassPluralText(classID)
 	return CLASS_PLURAL_NAMES[classID] or (ClassText(classID) .. "s")
 end
 
+local function IsLiveClient()
+	return type(_G.CreateFrame) == "function" and _G.UIParent ~= nil
+end
+
 local function PaladinHasImprovedWisdom(paladin)
 	if type(paladin) ~= "table" or type(paladin.skills) ~= "table" then
 		return false
@@ -2019,6 +2023,9 @@ function PPA:WithSimulationUnitAPIs(callback)
 	if not self:IsSimulationActive() then
 		return callback()
 	end
+	if IsLiveClient() then
+		error("Simulation unit API overrides are disabled in-game to avoid UI taint.")
+	end
 
 	local previous = {}
 	local names = {
@@ -2429,22 +2436,6 @@ function PPA:InstallSimulationHooks()
 	end
 	self.simulationHooksInstalledFor = pallyPower
 
-	local function wrapWithSimulationAPIs(methodName)
-		local original = pallyPower[methodName]
-		if type(original) ~= "function" then
-			return
-		end
-		pallyPower[methodName] = function(target, ...)
-			if PPA:IsSimulationActive() then
-				local args = {...}
-				return PPA:WithSimulationUnitAPIs(function()
-					return original(target, Unpack(args))
-				end)
-			end
-			return original(target, ...)
-		end
-	end
-
 	local function wrapNoopDuringSimulation(methodName)
 		local original = pallyPower[methodName]
 		if type(original) ~= "function" then
@@ -2458,8 +2449,8 @@ function PPA:InstallSimulationHooks()
 		end
 	end
 
-	wrapWithSimulationAPIs("UpdateRoster")
-	wrapWithSimulationAPIs("AutoAssign")
+	wrapNoopDuringSimulation("UpdateRoster")
+	wrapNoopDuringSimulation("AutoAssign")
 	wrapNoopDuringSimulation("UpdateAllPallys")
 	wrapNoopDuringSimulation("ScanSpells")
 	wrapNoopDuringSimulation("ScanCooldowns")
@@ -2504,7 +2495,9 @@ function PPA:OpenAssignmentFrame()
 			table.insert(_G.UISpecialFrames, "PallyPowerBlessingsFrame")
 		end
 	end
-	if _G.PallyPower.UpdateRoster then
+	if self:IsSimulationActive() and _G.PallyPower.UpdateLayout then
+		_G.PallyPower:UpdateLayout()
+	elseif _G.PallyPower.UpdateRoster then
 		_G.PallyPower:UpdateRoster()
 	elseif _G.PallyPower.UpdateLayout then
 		_G.PallyPower:UpdateLayout()
