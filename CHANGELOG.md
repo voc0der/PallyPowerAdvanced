@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.14] - 2026-05-15
+
+### Changed
+- Add a post-planning simplification pass that swaps blessing assignments between paladins to reduce the number of distinct buffs each paladin must cast, without downgrading blessing rank or talent quality for any class.
+
+### Tests
+- Add coverage for the simplification pass: prot paladin consolidates toward kings while retaining improved sanctuary, and becomes a one-blessing specialist when sanctuary talent parity allows.
+
 ## [0.1.13] - 2026-05-15
 
 ### Fixed

@@ -31,6 +31,18 @@ local function collectClassBuffs(plan, classID)
 	return buffs
 end
 
+local function countDistinctBuffs(classMap)
+	local seen = {}
+	local count = 0
+	for _, buff in pairs(classMap or {}) do
+		if buff and not seen[buff] then
+			seen[buff] = true
+			count = count + 1
+		end
+	end
+	return count, seen
+end
+
 local function baseContext()
 	return {
 		playerName = "Holyone",
@@ -849,6 +861,37 @@ test("simulation prot paladin provides blessing of sanctuary", function()
 			end
 			assertEquals(hasSanctuary, true, unit.name .. " should have sanctuary coverage")
 		end
+	end
+end)
+
+test("last pass simplifies prot toward kings without downgrading improved sanctuary", function()
+	local context = T.BuildSimulationContext(1)
+	local plan = T.BuildSmartPlan(context)
+	local distinct = countDistinctBuffs(plan.assignments.PpaSimProt1)
+
+	assertEquals(plan.assignments.PpaSimProt1[1], T.BUFF_SANCTUARY, "improved sanctuary should stay on prot for warriors")
+	assertEquals(plan.assignments.PpaSimProt1[2], T.BUFF_KINGS, "prot should take rogue kings after safe swap")
+	assertEquals(plan.assignments.PpaSimProt1[6], T.BUFF_KINGS, "prot should take hunter kings after safe swap")
+	assertEquals(plan.assignments.PpaSimHoly[2], T.BUFF_SALVATION, "holy should receive rogue salvation after swap")
+	assertEquals(plan.assignments.PpaSimHoly[6], T.BUFF_SALVATION, "holy should receive hunter salvation after swap")
+	assertEquals(distinct, 2, "prot should only keep kings plus protected sanctuary")
+end)
+
+test("last pass can create a one-blessing specialist with equal-quality swaps", function()
+	local context = T.BuildSimulationContext(1)
+	for _, paladin in ipairs(context.paladins) do
+		if paladin.name == "PpaSimProt1" then
+			paladin.skills[T.BUFF_SANCTUARY].talent = 0
+		end
+	end
+
+	local plan = T.BuildSmartPlan(context)
+	local distinct, buffs = countDistinctBuffs(plan.assignments.PpaSimProt1)
+
+	assertEquals(distinct, 1, "prot should become a one-blessing specialist")
+	assertEquals(buffs[T.BUFF_KINGS], true, "prot should become the kings paladin")
+	for classID = 1, 9 do
+		assertEquals(plan.assignments.PpaSimProt1[classID], T.BUFF_KINGS, "prot kings class " .. tostring(classID))
 	end
 end)
 

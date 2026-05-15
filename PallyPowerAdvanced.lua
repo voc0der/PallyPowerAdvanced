@@ -888,6 +888,282 @@ function PPA:SelectClassAssignments(context, classID, members, plan)
 	return selected, scoredBuffs
 end
 
+local function BuildPaladinLookup(context)
+	local lookup = {}
+	for _, paladin in ipairs(context and context.paladins or {}) do
+		lookup[paladin.name] = paladin
+	end
+	return lookup
+end
+
+local function CountAssignmentBuffs(classMap)
+	local counts = {}
+	local total = 0
+	local distinct = 0
+	for _, buff in pairs(classMap or {}) do
+		if buff and buff > 0 then
+			total = total + 1
+			if not counts[buff] then
+				distinct = distinct + 1
+				counts[buff] = 0
+			end
+			counts[buff] = counts[buff] + 1
+		end
+	end
+	return counts, total, distinct
+end
+
+local function SortedAssignmentBuffCounts(counts)
+	local sorted = {}
+	for buff, count in pairs(counts or {}) do
+		sorted[#sorted + 1] = {buff = buff, count = count}
+	end
+	table.sort(sorted, function(a, b)
+		if a.count ~= b.count then
+			return a.count > b.count
+		end
+		return (GENERAL_TIE_ORDER[a.buff] or 99) < (GENERAL_TIE_ORDER[b.buff] or 99)
+	end)
+	return sorted
+end
+
+local function AssignmentSimplicityScore(assignments, context)
+	local score = {
+		singleBuffPaladins = 0,
+		totalDistinctBuffs = 0,
+		maxDistinctBuffs = 0,
+	}
+
+	for _, paladin in ipairs(context and context.paladins or {}) do
+		local _, total, distinct = CountAssignmentBuffs(assignments and assignments[paladin.name])
+		if total > 0 then
+			if distinct == 1 then
+				score.singleBuffPaladins = score.singleBuffPaladins + 1
+			end
+			score.totalDistinctBuffs = score.totalDistinctBuffs + distinct
+			if distinct > score.maxDistinctBuffs then
+				score.maxDistinctBuffs = distinct
+			end
+		end
+	end
+
+	return score
+end
+
+local function SimplicityScoreIsBetter(candidate, current)
+	if candidate.singleBuffPaladins ~= current.singleBuffPaladins then
+		return candidate.singleBuffPaladins > current.singleBuffPaladins
+	end
+	if candidate.totalDistinctBuffs ~= current.totalDistinctBuffs then
+		return candidate.totalDistinctBuffs < current.totalDistinctBuffs
+	end
+	if candidate.maxDistinctBuffs ~= current.maxDistinctBuffs then
+		return candidate.maxDistinctBuffs < current.maxDistinctBuffs
+	end
+	return false
+end
+
+local function PaladinBuffQuality(paladin, buff)
+	local skill = SkillForBuff(paladin, buff)
+	return SkillTalent(skill), SkillRank(skill)
+end
+
+local function CanTakeBuffWithoutDowngrade(candidate, source, buff)
+	if not candidate or not source or not candidate.hasAddon or not source.hasAddon then
+		return false
+	end
+
+	local candidateTalent, candidateRank = PaladinBuffQuality(candidate, buff)
+	local sourceTalent, sourceRank = PaladinBuffQuality(source, buff)
+	return candidateTalent >= sourceTalent and candidateRank >= sourceRank
+end
+
+local function FindAssignedPaladinForClassBuff(context, assignments, classID, buff, excludedName)
+	for _, paladin in ipairs(context and context.paladins or {}) do
+		local name = paladin.name
+		local classMap = assignments and assignments[name]
+		if name ~= excludedName and classMap and classMap[classID] == buff then
+			return name
+		end
+	end
+	return nil
+end
+
+local function CopyAssignmentsWithSwaps(assignments, swaps)
+	local copy = DeepCopy(assignments) or {}
+	for _, swap in ipairs(swaps or {}) do
+		if copy[swap.paladinName] and copy[swap.otherName] then
+			copy[swap.paladinName][swap.classID] = swap.targetBuff
+			copy[swap.otherName][swap.classID] = swap.currentBuff
+		end
+	end
+	return copy
+end
+
+local function SimplificationCandidateIsBetter(candidate, best)
+	if not best then
+		return true
+	end
+	if candidate.score.singleBuffPaladins ~= best.score.singleBuffPaladins then
+		return candidate.score.singleBuffPaladins > best.score.singleBuffPaladins
+	end
+	if candidate.targetCount ~= best.targetCount then
+		return candidate.targetCount > best.targetCount
+	end
+	if SimplicityScoreIsBetter(candidate.score, best.score) then
+		return true
+	end
+	if SimplicityScoreIsBetter(best.score, candidate.score) then
+		return false
+	end
+	if candidate.currentCount ~= best.currentCount then
+		return candidate.currentCount < best.currentCount
+	end
+	if #candidate.swaps ~= #best.swaps then
+		return #candidate.swaps > #best.swaps
+	end
+	return false
+end
+
+function PPA:BuildGreaterAssignmentSimplificationSwaps(context, plan, paladinLookup, paladinName, targetBuff, currentBuff)
+	local swaps = {}
+	local classMap = plan.assignments and plan.assignments[paladinName]
+	local paladin = paladinLookup and paladinLookup[paladinName]
+	if not classMap or not paladin then
+		return nil
+	end
+
+	for classID, assignedBuff in pairs(classMap) do
+		if assignedBuff == currentBuff then
+			local otherName = FindAssignedPaladinForClassBuff(context, plan.assignments, classID, targetBuff, paladinName)
+			local otherPaladin = paladinLookup and paladinLookup[otherName]
+			if not otherName or not otherPaladin then
+				return nil
+			end
+			if not self:CanPaladinBuff(paladin, targetBuff) or not self:CanPaladinBuff(otherPaladin, currentBuff) then
+				return nil
+			end
+			if not CanTakeBuffWithoutDowngrade(paladin, otherPaladin, targetBuff) then
+				return nil
+			end
+			if not CanTakeBuffWithoutDowngrade(otherPaladin, paladin, currentBuff) then
+				return nil
+			end
+			swaps[#swaps + 1] = {
+				classID = classID,
+				paladinName = paladinName,
+				otherName = otherName,
+				targetBuff = targetBuff,
+				currentBuff = currentBuff,
+			}
+		end
+	end
+
+	return #swaps > 0 and swaps or nil
+end
+
+function PPA:UpdateSelectedAssignmentOwner(context, plan, classID, buff, paladin)
+	for _, classPlan in ipairs(plan.classPlans or {}) do
+		if classPlan.classID == classID then
+			for _, assignment in ipairs(classPlan.selected or {}) do
+				if assignment.buff == buff then
+					assignment.paladin = paladin
+					assignment.paladinScore = self:ScorePaladinForClassBuff(context, paladin, buff, classID, classPlan.members)
+					return
+				end
+			end
+		end
+	end
+end
+
+function PPA:ApplyGreaterAssignmentSwaps(context, plan, swaps, paladinLookup)
+	for _, swap in ipairs(swaps or {}) do
+		local paladin = paladinLookup[swap.paladinName]
+		local otherPaladin = paladinLookup[swap.otherName]
+		plan.assignments[swap.paladinName][swap.classID] = swap.targetBuff
+		plan.assignments[swap.otherName][swap.classID] = swap.currentBuff
+		self:UpdateSelectedAssignmentOwner(context, plan, swap.classID, swap.targetBuff, paladin)
+		self:UpdateSelectedAssignmentOwner(context, plan, swap.classID, swap.currentBuff, otherPaladin)
+	end
+end
+
+function PPA:SimplifyGreaterAssignmentWorkloads(context, plan)
+	if not context or not plan or not plan.assignments then
+		return
+	end
+
+	local paladinLookup = BuildPaladinLookup(context)
+	local changed = true
+	local guard = 0
+	while changed and guard < 50 do
+		changed = false
+		guard = guard + 1
+
+		local currentScore = AssignmentSimplicityScore(plan.assignments, context)
+		local bestCandidate
+
+		for _, paladin in ipairs(context.paladins or {}) do
+			local counts, total, distinct = CountAssignmentBuffs(plan.assignments[paladin.name])
+			if total > 0 and distinct > 1 then
+				local sortedCounts = SortedAssignmentBuffCounts(counts)
+				for _, target in ipairs(sortedCounts) do
+					for _, current in ipairs(sortedCounts) do
+						if current.buff ~= target.buff then
+							local swaps = self:BuildGreaterAssignmentSimplificationSwaps(
+								context,
+								plan,
+								paladinLookup,
+								paladin.name,
+								target.buff,
+								current.buff
+							)
+							if swaps then
+								local candidateAssignments = CopyAssignmentsWithSwaps(plan.assignments, swaps)
+								local candidateScore = AssignmentSimplicityScore(candidateAssignments, context)
+								local candidate = {
+									swaps = swaps,
+									score = candidateScore,
+									paladinName = paladin.name,
+									targetBuff = target.buff,
+									targetCount = target.count,
+									currentBuff = current.buff,
+									currentCount = current.count,
+								}
+								if SimplicityScoreIsBetter(candidateScore, currentScore)
+									and SimplificationCandidateIsBetter(candidate, bestCandidate)
+								then
+									bestCandidate = candidate
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+
+		if bestCandidate then
+			self:ApplyGreaterAssignmentSwaps(context, plan, bestCandidate.swaps, paladinLookup)
+			local _, _, distinct = CountAssignmentBuffs(plan.assignments[bestCandidate.paladinName])
+			if distinct == 1 then
+				plan.debugLines[#plan.debugLines + 1] = string.format(
+					"Simplified %s to only %s without downgrading blessing rank or talents.",
+					bestCandidate.paladinName,
+					BuffText(bestCandidate.targetBuff)
+				)
+			else
+				plan.debugLines[#plan.debugLines + 1] = string.format(
+					"Simplified %s toward %s by moving %s on %d class(es) without downgrading blessing rank or talents.",
+					bestCandidate.paladinName,
+					BuffText(bestCandidate.targetBuff),
+					BuffText(bestCandidate.currentBuff),
+					#bestCandidate.swaps
+				)
+			end
+			changed = true
+		end
+	end
+end
+
 function PPA:FindReplacementBuff(paladin, priority, provided, currentBuff)
 	local currentIndex = PriorityIndex(priority, currentBuff) or 999
 	for index, buff in ipairs(priority) do
@@ -1112,29 +1388,36 @@ function PPA:BuildSmartPlan(context)
 				assumed = assumed,
 			}
 			plan.classPlans[#plan.classPlans + 1] = classPlan
+		end
+	end
 
-			local pieces = {}
-			for _, assignment in ipairs(selected) do
-				pieces[#pieces + 1] = string.format(
-					"%s -> %s",
-					BuffText(assignment.buff),
-					assignment.paladin.name
-				)
+	self:SimplifyGreaterAssignmentWorkloads(context, plan)
+	for _, classPlan in ipairs(plan.classPlans) do
+		local classID = classPlan.classID
+		local members = classPlan.members
+		local selected = classPlan.selected
+		local assumed = classPlan.assumed
+		local pieces = {}
+		for _, assignment in ipairs(selected) do
+			pieces[#pieces + 1] = string.format(
+				"%s -> %s",
+				BuffText(assignment.buff),
+				assignment.paladin.name
+			)
+		end
+		if #pieces > 0 then
+			local prefix = ClassText(classID) .. ": "
+			if assumed then
+				prefix = prefix .. "no players found; assumed " .. RoleText(members[1].role) .. " priorities. "
 			end
-			if #pieces > 0 then
-				local prefix = ClassText(classID) .. ": "
-				if assumed then
-					prefix = prefix .. "no players found; assumed " .. RoleText(members[1].role) .. " priorities. "
-				end
-				plan.debugLines[#plan.debugLines + 1] = prefix .. table.concat(pieces, ", ")
-			else
-				plan.debugLines[#plan.debugLines + 1] = ClassText(classID) .. ": no castable blessing assignment found."
-			end
+			plan.debugLines[#plan.debugLines + 1] = prefix .. table.concat(pieces, ", ")
+		else
+			plan.debugLines[#plan.debugLines + 1] = ClassText(classID) .. ": no castable blessing assignment found."
+		end
 
-			if not assumed then
-				self:ApplyPlayerOverrides(context, classID, members, selected, plan)
-				self:ApplyTankSanctuaryFallbacks(context, classID, members, selected, plan)
-			end
+		if not assumed then
+			self:ApplyPlayerOverrides(context, classID, members, selected, plan)
+			self:ApplyTankSanctuaryFallbacks(context, classID, members, selected, plan)
 		end
 	end
 
