@@ -479,6 +479,12 @@ function PPA:GetPriorityForUnit(unit, context)
 			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 		elseif role == ROLE_TANK then
+			local peer = self.peerSpecs[unit.name]
+			local hasSanctityAura = peer and (peer.sanctityAura or 0) > 0
+			local hasHolyShield   = peer and (peer.holyShield   or 0) > 0
+			if hasSanctityAura and (hasHolyShield or role == ROLE_TANK) then
+				return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_KINGS, BUFF_LIGHT, BUFF_WISDOM, BUFF_MIGHT)
+			end
 			if (context and context.pallyCount or 0) <= 2 then
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_LIGHT, BUFF_MIGHT)
 			end
@@ -1917,10 +1923,12 @@ function PPA:BuildPaladinAuras(name)
 end
 
 local SPEC_TALENT_NAMES = {
-	["Improved Blessing of Might"]    = "impMight",
-	["Improved Blessing of Wisdom"]   = "impWisdom",
+	["Improved Blessing of Might"]     = "impMight",
+	["Improved Blessing of Wisdom"]    = "impWisdom",
 	["Improved Blessing of Sanctuary"] = "impSanc",
-	["Blessing of Kings"]             = "kings",
+	["Blessing of Kings"]              = "kings",
+	["Sanctity Aura"]                  = "sanctityAura",
+	["Holy Shield"]                    = "holyShield",
 }
 
 function PPA:ReadLocalTalents()
@@ -1936,7 +1944,7 @@ function PPA:ReadLocalTalents()
 	local activeGroup = GetActiveTalentGroup() or 1
 	local numTabs = (GetNumTalentTabs and GetNumTalentTabs()) or 3
 
-	local result = {activeTab = 1, impMight = 0, impWisdom = 0, impSanc = 0, kings = 0}
+	local result = {activeTab = 1, impMight = 0, impWisdom = 0, impSanc = 0, kings = 0, sanctityAura = 0, holyShield = 0}
 
 	local bestPoints = -1
 	for tab = 1, numTabs do
@@ -1970,8 +1978,8 @@ function PPA:BroadcastSpec()
 	if not t then
 		return
 	end
-	local msg = string.format("SPEC:%d|M:%d|W:%d|S:%d|K:%d|v:%d",
-		t.activeTab, t.impMight, t.impWisdom, t.impSanc, t.kings, PPA_SPEC_VERSION)
+	local msg = string.format("SPEC:%d|M:%d|W:%d|S:%d|K:%d|SA:%d|HS:%d|v:%d",
+		t.activeTab, t.impMight, t.impWisdom, t.impSanc, t.kings, t.sanctityAura, t.holyShield, PPA_SPEC_VERSION)
 	local IsInRaid  = _G.IsInRaid
 	local IsInGroup = _G.IsInGroup
 	local channel
@@ -1995,11 +2003,13 @@ function PPA:HandleAddonMessage(prefix, text, _, sender)
 	end
 	local name = sender:match("^([^%-]+)") or sender
 	self.peerSpecs[name] = {
-		activeTab = activeTab,
-		impMight  = tonumber(text:match("|M:(%d+)")) or 0,
-		impWisdom = tonumber(text:match("|W:(%d+)")) or 0,
-		impSanc   = tonumber(text:match("|S:(%d+)")) or 0,
-		kings     = tonumber(text:match("|K:(%d+)")) or 0,
+		activeTab    = activeTab,
+		impMight     = tonumber(text:match("|M:(%d+)")) or 0,
+		impWisdom    = tonumber(text:match("|W:(%d+)")) or 0,
+		impSanc      = tonumber(text:match("|S:(%d+)")) or 0,
+		kings        = tonumber(text:match("|K:(%d+)")) or 0,
+		sanctityAura = tonumber(text:match("|SA:(%d+)")) or 0,
+		holyShield   = tonumber(text:match("|HS:(%d+)")) or 0,
 	}
 end
 

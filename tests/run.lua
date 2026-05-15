@@ -103,6 +103,27 @@ test("warrior tank gets normal sanctuary instead of class salvation", function()
 	assertEquals(plan.normalAssignments.Tankadin[1].Shieldwall, T.BUFF_SANCTUARY, "warrior tank should receive sanctuary override")
 end)
 
+test("prot paladin with confirmed sanctity aura gets sanctuary before kings regardless of pally count", function()
+	local tankadin = {name = "Tankadin", class = "PALADIN", classID = 5, role = "TANK"}
+
+	-- Low pally count without sanctity aura: kings comes first
+	local priority = T.GetPriorityForUnit(tankadin, {pallyCount = 2})
+	assertEquals(priority[1], T.BUFF_KINGS, "without sanctity aura at low pally count, kings first")
+
+	-- Low pally count with confirmed sanctity aura + holy shield: sanctuary comes first
+	PPA.peerSpecs["Tankadin"] = {activeTab = 2, sanctityAura = 1, holyShield = 1, impSanc = 2, kings = 1, impMight = 0, impWisdom = 0}
+	priority = T.GetPriorityForUnit(tankadin, {pallyCount = 2})
+	assertEquals(priority[1], T.BUFF_SANCTUARY, "with sanctity aura at low pally count, sanctuary first")
+	assertEquals(priority[2], T.BUFF_KINGS, "with sanctity aura, kings second")
+
+	-- High pally count with confirmed sanctity aura: sanctuary still first
+	priority = T.GetPriorityForUnit(tankadin, {pallyCount = 5})
+	assertEquals(priority[1], T.BUFF_SANCTUARY, "with sanctity aura at high pally count, sanctuary first")
+	assertEquals(priority[2], T.BUFF_KINGS, "with sanctity aura at high pally count, kings second")
+
+	PPA.peerSpecs["Tankadin"] = nil
+end)
+
 test("elemental shaman damage prefers wisdom where enhancement prefers might", function()
 	local elemental = {name = "Stormbolt", class = "SHAMAN", classID = 9, role = "DAMAGER", spec = "ELEMENTAL"}
 	local enhancement = {name = "Windfury", class = "SHAMAN", classID = 9, role = "DAMAGER", spec = "ENHANCEMENT"}

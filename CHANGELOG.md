@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.1.16] - 2026-05-15
+
+### Changed
+- Prot paladins with confirmed Sanctity Aura talent (via PPA spec broadcast) who are also confirmed tanks (Holy Shield talent or tank role) now receive Blessing of Sanctuary as their top priority, with Blessing of Kings second. Without confirmed Sanctity Aura the existing pally-count logic is unchanged.
+- Sanctity Aura and Holy Shield are now included in the spec broadcast so peers can detect this combination.
+
+### Tests
+- Add coverage for prot paladin priority with and without confirmed Sanctity Aura, at both low and high pally counts.
+
 ## [0.1.15] - 2026-05-15
 
 ### Added
