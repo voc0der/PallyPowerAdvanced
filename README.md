@@ -12,7 +12,7 @@
 - Alerts you when another paladin changes your assignments
 - Plays a one-minute warning sound when one of your assigned blessings is about to expire
 
-Current version: `0.1.19`
+Current version: `0.1.20`
 
 ## Smart Assign
 
