@@ -311,6 +311,25 @@ local function ContextHasImprovedWisdom(context)
 	return false
 end
 
+local function UnitNamesMatch(left, right)
+	if not left or not right then
+		return false
+	end
+	if left == right then
+		return true
+	end
+	return string.match(left, "^([^-]+)") == string.match(right, "^([^-]+)")
+end
+
+local function FindContextPaladin(context, name)
+	for _, paladin in ipairs(context and context.paladins or {}) do
+		if UnitNamesMatch(paladin.name, name) or UnitNamesMatch(paladin.fullName, name) then
+			return paladin
+		end
+	end
+	return nil
+end
+
 local function Print(message)
 	if _G.DEFAULT_CHAT_FRAME and _G.DEFAULT_CHAT_FRAME.AddMessage then
 		_G.DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99PPA|r: " .. tostring(message))
@@ -499,6 +518,18 @@ local function SelectedHasNonSanctuaryBlessing(selected)
 	return false
 end
 
+function PPA:UnitHasImprovedWisdom(unit, context)
+	if PaladinHasImprovedWisdom(unit) then
+		return true
+	end
+	local contextPaladin = FindContextPaladin(context, unit and (unit.name or unit.fullName))
+	if PaladinHasImprovedWisdom(contextPaladin) then
+		return true
+	end
+	local specData = unit and unit.name and self:GetUnitSpecData(unit.name)
+	return type(specData) == "table" and SafeNumber(specData.impWisdom, 0) > 0
+end
+
 function PPA:GetBasePriorityForUnit(unit, context)
 	local role = NormalizeRole(unit.role)
 	local includeLight = context and context.healingPaladinPresent
@@ -534,12 +565,8 @@ function PPA:GetBasePriorityForUnit(unit, context)
 		end
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "PALADIN" then
-		if role == ROLE_HEALER then
-			if not improvedWisdom then
-				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
-			end
-			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
-		elseif role == ROLE_TANK then
+		local targetHasImprovedWisdom = self:UnitHasImprovedWisdom(unit, context)
+		if role == ROLE_TANK then
 			local specData = self:GetUnitSpecData(unit.name)
 			if specData then
 				if (specData.sanctityAura or 0) > 0 then
@@ -551,6 +578,11 @@ function PPA:GetBasePriorityForUnit(unit, context)
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_LIGHT, BUFF_MIGHT)
 			end
 			return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_KINGS, BUFF_LIGHT, BUFF_WISDOM, BUFF_MIGHT)
+		elseif role == ROLE_HEALER or targetHasImprovedWisdom then
+			if not (improvedWisdom or targetHasImprovedWisdom) then
+				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
+			end
+			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 		end
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "HUNTER" then

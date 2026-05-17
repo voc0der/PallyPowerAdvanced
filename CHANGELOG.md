@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.1.22] - 2026-05-17
+
+### Fixed
+- Paladin targets with Improved Wisdom now prefer Blessing of Wisdom over Kings even when role data is stale or missing.
+- Unimproved paladin healers still prefer Kings over Wisdom.
+
+### Tests
+- Add coverage for improved-Wisdom paladin target priority and unimproved healer paladin fallback priority.
+
 ## [0.1.21] - 2026-05-17
 
 ### Added

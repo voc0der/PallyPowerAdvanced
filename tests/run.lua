@@ -420,6 +420,119 @@ test("two paladin tank healer class assignment chooses kings and wisdom", functi
 	assertEquals(buffs[T.BUFF_SALVATION], nil, "paladin tank/healer pair should not spend a slot on salvation")
 end)
 
+test("improved wisdom paladin target gets wisdom even when role is stale", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 1,
+		healingPaladinPresent = false,
+		paladins = {
+			{
+				name = "Holyone",
+				role = "DAMAGER",
+				hasAddon = true,
+				skills = {
+					[T.BUFF_WISDOM] = skill(7, 2),
+					[T.BUFF_KINGS] = skill(1, 0),
+					[T.BUFF_SALVATION] = skill(1, 0),
+				},
+			},
+		},
+		players = {
+			{name = "Holyone", class = "PALADIN", classID = 5, role = "DAMAGER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Holyone[5], T.BUFF_WISDOM, "improved wisdom paladin should prefer wisdom over kings")
+end)
+
+test("unimproved healer paladin target gets kings over wisdom", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 1,
+		healingPaladinPresent = true,
+		improvedWisdomPaladinPresent = false,
+		paladins = {
+			{
+				name = "Holyone",
+				role = "HEALER",
+				hasAddon = true,
+				skills = {
+					[T.BUFF_WISDOM] = skill(7, 0),
+					[T.BUFF_KINGS] = skill(1, 0),
+					[T.BUFF_SALVATION] = skill(1, 0),
+				},
+			},
+		},
+		players = {
+			{name = "Holyone", class = "PALADIN", classID = 5, role = "HEALER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Holyone[5], T.BUFF_KINGS, "unimproved wisdom healer should prefer kings")
+end)
+
+test("healer druid with tank paladin gets kings when wisdom is unimproved", function()
+	local context = {
+		playerName = "Turing",
+		pallyCount = 1,
+		healingPaladinPresent = false,
+		improvedWisdomPaladinPresent = false,
+		paladins = {
+			{
+				name = "Turing",
+				role = "TANK",
+				hasAddon = true,
+				skills = {
+					[T.BUFF_WISDOM] = skill(7, 0),
+					[T.BUFF_KINGS] = skill(1, 0),
+					[T.BUFF_SALVATION] = skill(1, 0),
+					[T.BUFF_SANCTUARY] = skill(5, 2),
+				},
+			},
+		},
+		players = {
+			{name = "Turing", class = "PALADIN", classID = 5, role = "TANK"},
+			{name = "Lopedope", class = "DRUID", classID = 4, role = "HEALER"},
+			{name = "Smallpimp", class = "DRUID", classID = 4, role = "DAMAGER", spec = "FERAL"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Turing[4], T.BUFF_KINGS, "druid class should get kings when healer druid is present and wisdom is unimproved")
+end)
+
+test("healer druid with tank paladin gets wisdom override when wisdom is improved", function()
+	local context = {
+		playerName = "Turing",
+		pallyCount = 1,
+		healingPaladinPresent = false,
+		improvedWisdomPaladinPresent = true,
+		paladins = {
+			{
+				name = "Turing",
+				role = "TANK",
+				hasAddon = true,
+				skills = {
+					[T.BUFF_WISDOM] = skill(7, 2),
+					[T.BUFF_KINGS] = skill(1, 0),
+					[T.BUFF_SALVATION] = skill(1, 0),
+					[T.BUFF_SANCTUARY] = skill(5, 2),
+				},
+			},
+		},
+		players = {
+			{name = "Turing", class = "PALADIN", classID = 5, role = "TANK"},
+			{name = "Lopedope", class = "DRUID", classID = 4, role = "HEALER"},
+			{name = "Smallpimp", class = "DRUID", classID = 4, role = "DAMAGER", spec = "FERAL"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.normalAssignments.Turing[4].Lopedope, T.BUFF_WISDOM, "improved wisdom should override the healer druid's class blessing")
+end)
+
 test("tank paladin without improved wisdom gives healer priest kings", function()
 	local context = {
 		playerName = "Tankadin",
