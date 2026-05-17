@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.1.19] - 2026-05-17
+
+### Changed
+- Smart-Assign now detects battleground and arena contexts and adjusts blessing priorities for PvP.
+- Blessing of Salvation is omitted from PvP assignments.
+- Blessing of Sanctuary remains available in PvP, but is treated as the lowest-priority blessing and no longer gets forced by the PvE tank fallback when better blessings are assigned.
+
+### Tests
+- Add coverage for PvP priority filtering, PvP runtime context detection, skipping Salvation, avoiding forced Sanctuary fallbacks, and still assigning Sanctuary when it is the only castable option.
+
 ## [0.1.17] - 2026-05-15
 
 ### Fixed
