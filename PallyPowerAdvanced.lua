@@ -142,6 +142,14 @@ local GENERAL_TIE_ORDER = {
 	[BUFF_LIGHT] = 6,
 }
 
+local PVP_REMOVED_BLESSINGS = {
+	[BUFF_SALVATION] = true,
+}
+
+local PVP_LOW_PRIORITY_BLESSINGS = {
+	[BUFF_SANCTUARY] = true,
+}
+
 local MANUAL_CHOICES = {
 	WARRIOR = {
 		{label = "Damage", role = ROLE_DAMAGER},
@@ -438,7 +446,46 @@ function PPA:ApplyGuess(unit)
 	end
 end
 
-function PPA:GetPriorityForUnit(unit, context)
+local function IsPvPInstanceType(instanceType)
+	return instanceType == "pvp" or instanceType == "arena"
+end
+
+local function ContextIsPvP(context)
+	return context and context.pvpInstance == true
+end
+
+local function FilterPriorityForContext(priority, context)
+	if not ContextIsPvP(context) then
+		return priority
+	end
+
+	local filtered = {}
+	local lowPriority = {}
+	for _, buff in ipairs(priority or {}) do
+		if not PVP_REMOVED_BLESSINGS[buff] then
+			if PVP_LOW_PRIORITY_BLESSINGS[buff] then
+				AddUnique(lowPriority, buff)
+			else
+				AddUnique(filtered, buff)
+			end
+		end
+	end
+	for _, buff in ipairs(lowPriority) do
+		AddUnique(filtered, buff)
+	end
+	return filtered
+end
+
+local function SelectedHasNonSanctuaryBlessing(selected)
+	for _, assignment in ipairs(selected or {}) do
+		if assignment.buff and assignment.buff ~= BUFF_SANCTUARY then
+			return true
+		end
+	end
+	return false
+end
+
+function PPA:GetBasePriorityForUnit(unit, context)
 	local role = NormalizeRole(unit.role)
 	local includeLight = context and context.healingPaladinPresent
 	local improvedWisdom = ContextHasImprovedWisdom(context)
@@ -509,6 +556,10 @@ function PPA:GetPriorityForUnit(unit, context)
 	end
 
 	return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
+end
+
+function PPA:GetPriorityForUnit(unit, context)
+	return FilterPriorityForContext(self:GetBasePriorityForUnit(unit, context), context)
 end
 
 local function PriorityIndex(priority, buff)
@@ -1218,6 +1269,9 @@ function PPA:ApplyTankSanctuaryFallbacks(context, classID, members, selected, pl
 	if provided[BUFF_SANCTUARY] then
 		return
 	end
+	if ContextIsPvP(context) and SelectedHasNonSanctuaryBlessing(selected) then
+		return
+	end
 
 	for _, unit in ipairs(members or {}) do
 		if NormalizeRole(unit.role) == ROLE_TANK and not PlanHasNormalBuff(plan, classID, unit.name, BUFF_SANCTUARY) then
@@ -1386,6 +1440,9 @@ function PPA:BuildSmartPlan(context)
 		pallyLabels[#pallyLabels + 1] = paladin.name .. "(" .. RoleText(paladin.role) .. ", " .. source .. ")"
 	end
 	plan.debugLines[#plan.debugLines + 1] = "Paladins considered: " .. table.concat(pallyLabels, ", ")
+	if ContextIsPvP(context) then
+		plan.debugLines[#plan.debugLines + 1] = "PvP instance detected; skipping Salvation and treating Sanctuary as lowest priority."
+	end
 
 	local groups = GroupPlayersByClass(context.players)
 	for _, classID in ipairs(DEFAULT_CLASS_ORDER) do
@@ -2645,6 +2702,22 @@ function PPA:CollectRoster()
 	return players
 end
 
+function PPA:GetCurrentPvPInstanceType()
+	if _G.IsInInstance then
+		local ok, inInstance, instanceType = pcall(_G.IsInInstance)
+		if ok and inInstance and IsPvPInstanceType(instanceType) then
+			return instanceType
+		end
+	end
+	if _G.GetInstanceInfo then
+		local ok, _, instanceType = pcall(_G.GetInstanceInfo)
+		if ok and IsPvPInstanceType(instanceType) then
+			return instanceType
+		end
+	end
+	return nil
+end
+
 function PPA:BuildRuntimeContext(guess)
 	self:EnsureDB()
 	if self:IsSimulationActive() then
@@ -2654,6 +2727,7 @@ function PPA:BuildRuntimeContext(guess)
 
 	local players = self:CollectRoster()
 	local paladins = {}
+	local pvpInstanceType = self:GetCurrentPvPInstanceType()
 	for _, unit in ipairs(players) do
 		if unit.class == "PALADIN" then
 			local hasAddon = type(_G.AllPallys) == "table" and type(_G.AllPallys[unit.name]) == "table"
@@ -2686,6 +2760,8 @@ function PPA:BuildRuntimeContext(guess)
 		playerName = _G.PallyPower and _G.PallyPower.player or (_G.UnitName and _G.UnitName("player")) or "",
 		healingPaladinPresent = false,
 		improvedWisdomPaladinPresent = false,
+		pvpInstance = pvpInstanceType ~= nil,
+		pvpInstanceType = pvpInstanceType,
 	}
 
 	for _, unit in ipairs(players) do
@@ -3601,6 +3677,9 @@ PPA._test = {
 	end,
 	GetPriorityForUnit = function(unit, context)
 		return PPA:GetPriorityForUnit(unit, context)
+	end,
+	GetCurrentPvPInstanceType = function()
+		return PPA:GetCurrentPvPInstanceType()
 	end,
 	InferPaladinRoleFromSkills = function(skills)
 		return PPA:InferPaladinRoleFromSkills(skills)
