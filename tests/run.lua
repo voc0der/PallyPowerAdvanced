@@ -43,6 +43,38 @@ local function countDistinctBuffs(classMap)
 	return count, seen
 end
 
+local function planContainsBuff(plan, buff)
+	for _, classMap in pairs(plan.assignments or {}) do
+		for _, assignedBuff in pairs(classMap or {}) do
+			if assignedBuff == buff then
+				return true
+			end
+		end
+	end
+	for _, classMap in pairs(plan.normalAssignments or {}) do
+		for _, targets in pairs(classMap or {}) do
+			for _, assignedBuff in pairs(targets or {}) do
+				if assignedBuff == buff then
+					return true
+				end
+			end
+		end
+	end
+	for _, manual in pairs(plan.manualAssignments or {}) do
+		for _, assignedBuff in pairs(manual.greater or {}) do
+			if assignedBuff == buff then
+				return true
+			end
+		end
+		for _, normal in ipairs(manual.normal or {}) do
+			if normal.buff == buff then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 local function baseContext()
 	return {
 		playerName = "Holyone",
@@ -101,6 +133,74 @@ test("warrior tank gets normal sanctuary instead of class salvation", function()
 	assertEquals(plan.assignments.Holyone[1], T.BUFF_KINGS, "holy paladin should cover warrior kings")
 	assertEquals(plan.assignments.Tankadin[1], T.BUFF_SALVATION, "tank paladin should cover warrior salvation")
 	assertEquals(plan.normalAssignments.Tankadin[1].Shieldwall, T.BUFF_SANCTUARY, "warrior tank should receive sanctuary override")
+end)
+
+test("pvp priority removes salvation and pushes sanctuary last", function()
+	local context = {pvpInstance = true, healingPaladinPresent = true, improvedWisdomPaladinPresent = true, pallyCount = 4}
+	local rogue = {name = "Sneaky", class = "ROGUE", classID = 2, role = "DAMAGER"}
+	local tank = {name = "Shieldwall", class = "WARRIOR", classID = 1, role = "TANK"}
+
+	local priority = T.GetPriorityForUnit(rogue, context)
+	assertEquals(priority[1], T.BUFF_MIGHT, "rogue pvp first priority")
+	assertEquals(priority[2], T.BUFF_KINGS, "rogue pvp second priority")
+	assertEquals(priority[3], T.BUFF_LIGHT, "rogue pvp third priority")
+	assertEquals(priority[4], T.BUFF_SANCTUARY, "rogue pvp sanctuary should be last")
+	for _, buff in ipairs(priority) do
+		assertEquals(buff == T.BUFF_SALVATION, false, "pvp priority should omit salvation")
+	end
+
+	priority = T.GetPriorityForUnit(tank, context)
+	assertEquals(priority[1], T.BUFF_KINGS, "tank pvp first priority")
+	assertEquals(priority[#priority], T.BUFF_SANCTUARY, "tank pvp sanctuary should be last")
+end)
+
+test("pvp plan skips salvation without forcing sanctuary over better blessings", function()
+	local context = baseContext()
+	context.pvpInstance = true
+	context.pvpInstanceType = "pvp"
+	context.players = {
+		{name = "Shieldwall", class = "WARRIOR", classID = 1, role = "TANK"},
+		{name = "Slammer", class = "WARRIOR", classID = 1, role = "DAMAGER"},
+		{name = "Cleave", class = "WARRIOR", classID = 1, role = "DAMAGER"},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	local warriorBuffs = {
+		[plan.assignments.Holyone[1]] = true,
+		[plan.assignments.Tankadin[1]] = true,
+	}
+	assertEquals(warriorBuffs[T.BUFF_KINGS], true, "pvp warriors should get kings")
+	assertEquals(warriorBuffs[T.BUFF_MIGHT], true, "pvp warriors should get might")
+	assertEquals(plan.normalAssignments.Tankadin and plan.normalAssignments.Tankadin[1], nil, "pvp should not force tank sanctuary fallback")
+	assertEquals(planContainsBuff(plan, T.BUFF_SALVATION), false, "pvp plan should never assign salvation")
+	assertEquals(planContainsBuff(plan, T.BUFF_SANCTUARY), false, "pvp plan should prefer better blessings before sanctuary")
+end)
+
+test("pvp plan can still assign sanctuary when it is the only castable blessing", function()
+	local context = {
+		playerName = "Tankadin",
+		pallyCount = 1,
+		healingPaladinPresent = false,
+		pvpInstance = true,
+		pvpInstanceType = "arena",
+		paladins = {
+			{
+				name = "Tankadin",
+				role = "TANK",
+				hasAddon = true,
+				skills = {
+					[T.BUFF_SANCTUARY] = skill(5, 2),
+				},
+			},
+		},
+		players = {
+			{name = "Shieldwall", class = "WARRIOR", classID = 1, role = "TANK"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Tankadin[1], T.BUFF_SANCTUARY, "pvp should keep sanctuary when it is the only castable option")
+	assertEquals(planContainsBuff(plan, T.BUFF_SALVATION), false, "pvp plan should still omit salvation")
 end)
 
 test("prot paladin priority uses confirmed spec data over pally count heuristic", function()
@@ -444,6 +544,47 @@ test("runtime context refresh repairs PallyPower cooldown tables after ScanSpell
 	_G.IsInRaid = old.IsInRaid
 	_G.UnitExists = old.UnitExists
 	_G.MAX_PARTY_MEMBERS = old.MAX_PARTY_MEMBERS
+end)
+
+test("runtime context marks battlegrounds and arenas as pvp assignment contexts", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		AllPallys = _G.AllPallys,
+		IsInInstance = _G.IsInInstance,
+		CollectRoster = PPA.CollectRoster,
+	}
+
+	_G.PallyPower = {player = "Holyone"}
+	_G.AllPallys = {}
+	PPA.CollectRoster = function()
+		return {}
+	end
+
+	_G.IsInInstance = function()
+		return true, "pvp"
+	end
+	local context = T.BuildRuntimeContext(false)
+	assertEquals(context.pvpInstance, true, "battleground should be a pvp assignment context")
+	assertEquals(context.pvpInstanceType, "pvp", "battleground instance type")
+
+	_G.IsInInstance = function()
+		return true, "arena"
+	end
+	context = T.BuildRuntimeContext(false)
+	assertEquals(context.pvpInstance, true, "arena should be a pvp assignment context")
+	assertEquals(context.pvpInstanceType, "arena", "arena instance type")
+
+	_G.IsInInstance = function()
+		return true, "raid"
+	end
+	context = T.BuildRuntimeContext(false)
+	assertEquals(context.pvpInstance, false, "raid should keep normal assignment priorities")
+	assertEquals(context.pvpInstanceType, nil, "non-pvp instance type")
+
+	_G.PallyPower = old.PallyPower
+	_G.AllPallys = old.AllPallys
+	_G.IsInInstance = old.IsInInstance
+	PPA.CollectRoster = old.CollectRoster
 end)
 
 test("assignment alert reports class-wide changes for the local paladin", function()
