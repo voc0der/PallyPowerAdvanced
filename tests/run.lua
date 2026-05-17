@@ -743,6 +743,158 @@ test("assignment alert hook reports after PallyPower accepts incoming assignment
 	PPA.assignmentAlertsHooked = old.assignmentAlertsHooked
 end)
 
+test("assignment trace hook reports external changes to other paladin rows", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_AuraAssignments = _G.PallyPower_AuraAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+		AllPallys = _G.AllPallys,
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
+		db = PPA.db,
+		assignmentAlertsHooked = PPA.assignmentAlertsHooked,
+	}
+	local messages = {}
+
+	PPA.assignmentAlertsHooked = false
+	_G.PallyPowerAdvancedDB = {debug = false, specs = {}, assignmentTrace = true}
+	PPA.db = nil
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.AllPallys = {Holyone = {}, Tankadin = {}}
+	_G.PallyPower_Assignments = {
+		Holyone = {[5] = 0},
+		Tankadin = {[5] = T.BUFF_KINGS},
+	}
+	_G.PallyPower_NormalAssignments = {Holyone = {}, Tankadin = {}}
+	_G.PallyPower_AuraAssignments = {Holyone = 0, Tankadin = 0}
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+	_G.PallyPower = {
+		player = "Holyone",
+		ParseMessage = function(_, _, message)
+			if message == "ASSIGN Tankadin 5 1" then
+				_G.PallyPower_Assignments.Tankadin[5] = T.BUFF_WISDOM
+			end
+		end,
+	}
+
+	PPA:HookAssignmentAlerts()
+	_G.PallyPower:ParseMessage("Leadadin", "ASSIGN Tankadin 5 1")
+
+	assertEquals(
+		messages[1],
+		"|cff33ff99PPA|r: Trace: Leadadin set Tankadin to Blessing of Wisdom on all Paladins.",
+		"assignment trace should identify sender for other rows"
+	)
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_AuraAssignments = old.PallyPower_AuraAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+	_G.AllPallys = old.AllPallys
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
+	PPA.db = old.db
+	PPA.assignmentAlertsHooked = old.assignmentAlertsHooked
+end)
+
+test("assignment conflict warning waits for second external burst after local assign", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_AuraAssignments = _G.PallyPower_AuraAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+		AllPallys = _G.AllPallys,
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
+		GetTime = _G.GetTime,
+		db = PPA.db,
+		assignmentAlertsHooked = PPA.assignmentAlertsHooked,
+		assignmentConflictWatch = PPA.assignmentConflictWatch,
+	}
+	local messages = {}
+	local now = 100
+
+	PPA.assignmentAlertsHooked = false
+	PPA.assignmentConflictWatch = nil
+	_G.PallyPowerAdvancedDB = {debug = false, specs = {}, assignmentTrace = false}
+	PPA.db = nil
+	_G.GetTime = function()
+		return now
+	end
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.AllPallys = {Holyone = {}, Tankadin = {}}
+	_G.PallyPower_Assignments = {
+		Holyone = {[5] = 0},
+		Tankadin = {[5] = T.BUFF_KINGS},
+	}
+	_G.PallyPower_NormalAssignments = {Holyone = {}, Tankadin = {}}
+	_G.PallyPower_AuraAssignments = {Holyone = 0, Tankadin = 0}
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+	_G.PallyPower = {
+		player = "Holyone",
+		ParseMessage = function(_, _, message)
+			if message == "ASSIGN Tankadin 5 1" then
+				_G.PallyPower_Assignments.Tankadin[5] = T.BUFF_WISDOM
+			elseif message == "ASSIGN Tankadin 5 3" then
+				_G.PallyPower_Assignments.Tankadin[5] = T.BUFF_KINGS
+			end
+		end,
+	}
+
+	PPA:HookAssignmentAlerts()
+	PPA:NoteLocalAssignmentAction("Auto-Assign")
+	_G.PallyPower:ParseMessage("Leadadin", "ASSIGN Tankadin 5 1")
+	assertEquals(#messages, 0, "first external burst should be quiet")
+
+	now = 100.5
+	_G.PallyPower:ParseMessage("Leadadin", "ASSIGN Tankadin 5 3")
+	assertEquals(#messages, 0, "same sender burst should stay grouped")
+
+	now = 103
+	_G.PallyPower:ParseMessage("Leadadin", "ASSIGN Tankadin 5 1")
+
+	assertEquals(
+		messages[1],
+		"|cff33ff99PPA|r: Assignment conflict: Leadadin overwrote assignments again 3.0s after your Auto-Assign.",
+		"conflict warning headline"
+	)
+	assertEquals(
+		messages[2],
+		"|cff33ff99PPA|r: Reason: your client accepted a second external PallyPower assignment burst inside 5s; Free Assignment or raid lead/assist can allow that override.",
+		"conflict warning reason"
+	)
+	assertEquals(
+		messages[3],
+		"|cff33ff99PPA|r: Last change: Tankadin -> Blessing of Wisdom on all Paladins.",
+		"conflict warning detail"
+	)
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_AuraAssignments = old.PallyPower_AuraAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+	_G.AllPallys = old.AllPallys
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
+	_G.GetTime = old.GetTime
+	PPA.db = old.db
+	PPA.assignmentAlertsHooked = old.assignmentAlertsHooked
+	PPA.assignmentConflictWatch = old.assignmentConflictWatch
+end)
+
 test("buff warning sound temporarily unmutes and restores audio cvars", function()
 	local old = {
 		SOUNDKIT = _G.SOUNDKIT,
@@ -1135,6 +1287,42 @@ test("simulation PallyPower hooks do not replace live unit APIs", function()
 	PPA.simulationHooksInstalledFor = old.simulationHooksInstalledFor
 	_G.IsInRaid = old.IsInRaid
 	_G.GetRaidRosterInfo = old.GetRaidRosterInfo
+end)
+
+test("PallyPower auto assign starts conflict watch", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		simulation = PPA.simulation,
+		assignmentActionHooksInstalledFor = PPA.assignmentActionHooksInstalledFor,
+		assignmentConflictWatch = PPA.assignmentConflictWatch,
+		GetTime = _G.GetTime,
+	}
+	local autoAssignCalls = 0
+
+	PPA.simulation = nil
+	PPA.assignmentActionHooksInstalledFor = nil
+	PPA.assignmentConflictWatch = nil
+	_G.GetTime = function()
+		return 200
+	end
+	_G.PallyPower = {
+		AutoAssign = function()
+			autoAssignCalls = autoAssignCalls + 1
+		end,
+	}
+
+	PPA:InstallAssignmentActionHooks()
+	_G.PallyPower:AutoAssign()
+
+	assertEquals(autoAssignCalls, 1, "wrapped auto assign should still call original")
+	assertEquals(PPA.assignmentConflictWatch.source, "Auto-Assign", "auto assign should start conflict watch")
+	assertEquals(PPA.assignmentConflictWatch.startedAt, 200, "conflict watch should use current time")
+
+	_G.PallyPower = old.PallyPower
+	PPA.simulation = old.simulation
+	PPA.assignmentActionHooksInstalledFor = old.assignmentActionHooksInstalledFor
+	PPA.assignmentConflictWatch = old.assignmentConflictWatch
+	_G.GetTime = old.GetTime
 end)
 
 test("simulation unit API shim refuses live client globals", function()

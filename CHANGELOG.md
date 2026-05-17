@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.1.21] - 2026-05-17
+
+### Added
+- Add `/ppa trace on` assignment tracing to identify which external PallyPower sender changes any raid assignment row.
+- Add automatic assignment conflict warnings when an external sender overwrites assignments twice within five seconds of a local Smart-Assign or Auto-Assign.
+
+### Tests
+- Add coverage for tracing assignment changes outside the local paladin's own row.
+- Add coverage for suppressing the first external assignment burst and warning on the second burst.
+
 ## [0.1.20] - 2026-05-17
 
 ### Changed

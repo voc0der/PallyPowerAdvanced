@@ -24,6 +24,8 @@ local BUFF_WARNING_RESTORE_DELAY = 2
 local BUFF_WARNING_SOUND_CHANNEL = "Master"
 local BUFF_WARNING_SOUNDKIT = "UI_PROFESSIONS_NEW_RECIPE_LEARNED_TOAST"
 local BUFF_WARNING_SOUNDKIT_FALLBACK = "IG_MAINMENU_OPTION_CHECKBOX_ON"
+local ASSIGNMENT_CONFLICT_WINDOW_SECONDS = 5
+local ASSIGNMENT_CONFLICT_BURST_SECONDS = 1
 
 local PPA_SPEC_PREFIX = "PPA"
 local PPA_SPEC_VERSION = 1
@@ -317,6 +319,10 @@ local function Print(message)
 	end
 end
 
+local function Now()
+	return (_G.GetTime and _G.GetTime()) or (_G.time and _G.time()) or 0
+end
+
 local function JoinBuffs(list)
 	local names = {}
 	for _, buff in ipairs(list or {}) do
@@ -336,6 +342,9 @@ function PPA:EnsureDB()
 	if db.debug == nil then
 		db.debug = false
 	end
+	if db.assignmentTrace == nil then
+		db.assignmentTrace = false
+	end
 	if db.buffWarningSound == nil then
 		db.buffWarningSound = true
 	end
@@ -352,6 +361,11 @@ function PPA:Debug(message)
 	if self:IsDebugEnabled() then
 		Print(message)
 	end
+end
+
+function PPA:IsAssignmentTraceEnabled()
+	local db = self:EnsureDB()
+	return db.assignmentTrace == true
 end
 
 function PPA:GetManualChoice(unit)
@@ -1563,19 +1577,21 @@ function PPA:IsAssignmentAlertMessage(message)
 		or string.find(message, "^PASSIGN")
 		or string.find(message, "^MASSIGN")
 		or string.find(message, "^NASSIGN")
+		or string.find(message, "^AASSIGN")
 		or string.find(message, "^CLEAR")
 	)
 end
 
-function PPA:SnapshotOwnAssignments()
-	local playerName = self:GetLocalPaladinName()
+function PPA:SnapshotPaladinAssignments(playerName)
 	if not playerName then
 		return nil
 	end
+	playerName = RemoveRealmName(playerName)
 
 	local snapshot = {
 		greater = {},
 		normal = {},
+		aura = 0,
 	}
 
 	local assignments = _G.PallyPower_Assignments and _G.PallyPower_Assignments[playerName]
@@ -1596,6 +1612,47 @@ function PPA:SnapshotOwnAssignments()
 		end
 	end
 
+	local auraAssignments = _G.PallyPower_AuraAssignments
+	snapshot.aura = SafeNumber(auraAssignments and auraAssignments[playerName], 0)
+
+	return snapshot
+end
+
+function PPA:SnapshotOwnAssignments()
+	return self:SnapshotPaladinAssignments(self:GetLocalPaladinName())
+end
+
+local function AddAssignmentSnapshotName(names, name)
+	local normalized = RemoveRealmName(name)
+	if normalized and normalized ~= "" then
+		names[normalized] = true
+	end
+end
+
+function PPA:SnapshotAllAssignments()
+	local names = {}
+	for name in pairs(_G.PallyPower_Assignments or {}) do
+		AddAssignmentSnapshotName(names, name)
+	end
+	for name in pairs(_G.PallyPower_NormalAssignments or {}) do
+		AddAssignmentSnapshotName(names, name)
+	end
+	for name in pairs(_G.PallyPower_AuraAssignments or {}) do
+		AddAssignmentSnapshotName(names, name)
+	end
+	for name in pairs(_G.AllPallys or {}) do
+		AddAssignmentSnapshotName(names, name)
+	end
+	if _G.PallyPower and _G.PallyPower.player then
+		AddAssignmentSnapshotName(names, _G.PallyPower.player)
+	end
+
+	local snapshot = {
+		paladins = {},
+	}
+	for name in pairs(names) do
+		snapshot.paladins[name] = self:SnapshotPaladinAssignments(name)
+	end
 	return snapshot
 end
 
@@ -1649,11 +1706,19 @@ function PPA:DescribeAssignmentChange(sender, change)
 	return nil
 end
 
-function PPA:CollectAssignmentChanges(before, after)
+function PPA:CollectAssignmentChanges(before, after, includeMissing)
 	local changes = {}
 	if not before or not after then
-		return changes
+		if not includeMissing then
+			return changes
+		end
+		before = before or {greater = {}, normal = {}}
+		after = after or {greater = {}, normal = {}}
 	end
+	before.greater = before.greater or {}
+	before.normal = before.normal or {}
+	after.greater = after.greater or {}
+	after.normal = after.normal or {}
 
 	for classID = 1, self:GetMaxClasses() do
 		local oldBuff = SafeNumber(before.greater and before.greater[classID], 0)
@@ -1688,6 +1753,53 @@ function PPA:CollectAssignmentChanges(before, after)
 	return changes
 end
 
+local function AddPaladinSnapshotKeys(keys, snapshot)
+	for name in pairs(snapshot and snapshot.paladins or {}) do
+		keys[name] = true
+	end
+end
+
+function PPA:CollectAllAssignmentChanges(before, after)
+	local changes = {}
+	local paladinNames = {}
+	AddPaladinSnapshotKeys(paladinNames, before)
+	AddPaladinSnapshotKeys(paladinNames, after)
+
+	for paladinName in pairs(paladinNames) do
+		local beforePaladin = before and before.paladins and before.paladins[paladinName]
+		local afterPaladin = after and after.paladins and after.paladins[paladinName]
+		for _, change in ipairs(self:CollectAssignmentChanges(beforePaladin, afterPaladin, true)) do
+			change.paladinName = paladinName
+			changes[#changes + 1] = change
+		end
+
+		local oldAura = SafeNumber(beforePaladin and beforePaladin.aura, 0)
+		local newAura = SafeNumber(afterPaladin and afterPaladin.aura, 0)
+		if oldAura ~= newAura then
+			changes[#changes + 1] = {
+				kind = "aura",
+				paladinName = paladinName,
+				aura = newAura,
+			}
+		end
+	end
+
+	table.sort(changes, function(a, b)
+		if (a.paladinName or "") ~= (b.paladinName or "") then
+			return (a.paladinName or "") < (b.paladinName or "")
+		end
+		if (a.kind or "") ~= (b.kind or "") then
+			return (a.kind or "") < (b.kind or "")
+		end
+		if SafeNumber(a.classID, 0) ~= SafeNumber(b.classID, 0) then
+			return SafeNumber(a.classID, 0) < SafeNumber(b.classID, 0)
+		end
+		return tostring(a.targetName or "") < tostring(b.targetName or "")
+	end)
+
+	return changes
+end
+
 function PPA:ReportAssignmentChanges(sender, before, after)
 	local source = RemoveRealmName(sender)
 	local playerName = self:GetLocalPaladinName()
@@ -1704,6 +1816,192 @@ function PPA:ReportAssignmentChanges(sender, before, after)
 	end
 end
 
+function PPA:DescribeRaidAssignmentChange(sender, change)
+	local source = RemoveRealmName(sender) or "Someone"
+	local assignee = change.paladinName or "Unknown"
+	if change.kind == "greater" then
+		if change.buff and change.buff > 0 then
+			return string.format(
+				"Trace: %s set %s to %s on all %s.",
+				source,
+				assignee,
+				LongBuffText(change.buff),
+				ClassPluralText(change.classID)
+			)
+		end
+		return string.format(
+			"Trace: %s cleared %s's assignment for all %s.",
+			source,
+			assignee,
+			ClassPluralText(change.classID)
+		)
+	end
+
+	if change.kind == "normal" then
+		if change.buff and change.buff > 0 then
+			return string.format(
+				"Trace: %s set %s to single-buff %s on %s.",
+				source,
+				assignee,
+				LongBuffText(change.buff),
+				change.targetName
+			)
+		end
+		return string.format(
+			"Trace: %s cleared %s's single-buff assignment on %s.",
+			source,
+			assignee,
+			change.targetName
+		)
+	end
+
+	if change.kind == "aura" then
+		if change.aura and change.aura > 0 then
+			return string.format("Trace: %s set %s to %s.", source, assignee, AuraText(change.aura))
+		end
+		return string.format("Trace: %s cleared %s's aura assignment.", source, assignee)
+	end
+
+	return nil
+end
+
+function PPA:DescribeRaidAssignmentChangeDetail(change)
+	local assignee = change.paladinName or "Unknown"
+	if change.kind == "greater" then
+		if change.buff and change.buff > 0 then
+			return string.format(
+				"%s -> %s on all %s",
+				assignee,
+				LongBuffText(change.buff),
+				ClassPluralText(change.classID)
+			)
+		end
+		return string.format("%s -> cleared all %s", assignee, ClassPluralText(change.classID))
+	end
+
+	if change.kind == "normal" then
+		if change.buff and change.buff > 0 then
+			return string.format("%s -> single-buff %s on %s", assignee, LongBuffText(change.buff), change.targetName)
+		end
+		return string.format("%s -> cleared single-buff on %s", assignee, change.targetName)
+	end
+
+	if change.kind == "aura" then
+		if change.aura and change.aura > 0 then
+			return string.format("%s -> %s", assignee, AuraText(change.aura))
+		end
+		return string.format("%s -> cleared aura", assignee)
+	end
+
+	return "unknown assignment change"
+end
+
+function PPA:NoteLocalAssignmentAction(source)
+	self.assignmentConflictWatch = {
+		source = source or "assignment",
+		startedAt = Now(),
+		externalBursts = 0,
+		warned = false,
+	}
+end
+
+function PPA:IsAssignmentConflictWatchActive(now)
+	local watch = self.assignmentConflictWatch
+	if not watch or not watch.startedAt then
+		return false
+	end
+	now = now or Now()
+	if now - watch.startedAt > ASSIGNMENT_CONFLICT_WINDOW_SECONDS then
+		self.assignmentConflictWatch = nil
+		return false
+	end
+	return true
+end
+
+function PPA:ReportAssignmentConflict(source, watch, changes, now)
+	local elapsed = math.max(0, now - (watch.startedAt or now))
+	local detail = changes[1] and self:DescribeRaidAssignmentChangeDetail(changes[1]) or "no changed assignment detail"
+	Print(string.format(
+		"Assignment conflict: %s overwrote assignments again %.1fs after your %s.",
+		source,
+		elapsed,
+		watch.source or "assignment"
+	))
+	Print("Reason: your client accepted a second external PallyPower assignment burst inside 5s; Free Assignment or raid lead/assist can allow that override.")
+	Print("Last change: " .. detail .. ".")
+end
+
+function PPA:HandleAssignmentConflict(sender, before, after)
+	local source = RemoveRealmName(sender)
+	local playerName = self:GetLocalPaladinName()
+	if not source or source == playerName then
+		return
+	end
+
+	local now = Now()
+	if not self:IsAssignmentConflictWatchActive(now) then
+		return
+	end
+
+	local changes = self:CollectAllAssignmentChanges(before, after)
+	if #changes == 0 then
+		return
+	end
+
+	local watch = self.assignmentConflictWatch
+	local sameBurst = watch.lastExternalAt
+		and watch.lastSender == source
+		and (now - watch.lastExternalAt) <= ASSIGNMENT_CONFLICT_BURST_SECONDS
+	watch.lastExternalAt = now
+	watch.lastSender = source
+	watch.lastChanges = changes
+	if not sameBurst then
+		watch.externalBursts = (watch.externalBursts or 0) + 1
+	end
+
+	if not watch.warned and (watch.externalBursts or 0) >= 2 then
+		self:ReportAssignmentConflict(source, watch, changes, now)
+		watch.warned = true
+	end
+end
+
+function PPA:ReportAssignmentTrace(sender, before, after)
+	if not self:IsAssignmentTraceEnabled() then
+		return
+	end
+
+	local source = RemoveRealmName(sender)
+	local playerName = self:GetLocalPaladinName()
+	if not source or source == playerName then
+		return
+	end
+
+	local changes = self:CollectAllAssignmentChanges(before, after)
+	if #changes == 0 then
+		return
+	end
+
+	if #changes == 1 then
+		local message = self:DescribeRaidAssignmentChange(source, changes[1])
+		if message then
+			Print(message)
+		end
+		return
+	end
+
+	Print(string.format("Trace: %s changed %d PallyPower assignments.", source, #changes))
+	local detailLimit = 8
+	for index = 1, math.min(#changes, detailLimit) do
+		local message = self:DescribeRaidAssignmentChange(source, changes[index])
+		if message then
+			Print(message)
+		end
+	end
+	if #changes > detailLimit then
+		Print(string.format("Trace: %d more assignment changes hidden.", #changes - detailLimit))
+	end
+end
+
 function PPA:HookAssignmentAlerts()
 	if self.assignmentAlertsHooked or not _G.PallyPower or type(_G.PallyPower.ParseMessage) ~= "function" then
 		return
@@ -1712,14 +2010,23 @@ function PPA:HookAssignmentAlerts()
 	local originalParseMessage = _G.PallyPower.ParseMessage
 	_G.PallyPower.ParseMessage = function(pallyPower, sender, message, ...)
 		local before
+		local allBefore
 		if PPA:IsAssignmentAlertMessage(message) then
 			before = PPA:SnapshotOwnAssignments()
+			if PPA:IsAssignmentTraceEnabled() or PPA:IsAssignmentConflictWatchActive() then
+				allBefore = PPA:SnapshotAllAssignments()
+			end
 		end
 
 		local result = originalParseMessage(pallyPower, sender, message, ...)
 
 		if before then
 			PPA:ReportAssignmentChanges(sender, before, PPA:SnapshotOwnAssignments())
+			if allBefore then
+				local allAfter = PPA:SnapshotAllAssignments()
+				PPA:ReportAssignmentTrace(sender, allBefore, allAfter)
+				PPA:HandleAssignmentConflict(sender, allBefore, allAfter)
+			end
 		end
 
 		return result
@@ -2959,6 +3266,25 @@ function PPA:InstallSimulationHooks()
 	wrapNoopDuringSimulation("SendMessage")
 end
 
+function PPA:InstallAssignmentActionHooks()
+	local pallyPower = _G.PallyPower
+	if not pallyPower or self.assignmentActionHooksInstalledFor == pallyPower then
+		return
+	end
+	self.assignmentActionHooksInstalledFor = pallyPower
+
+	local originalAutoAssign = pallyPower.AutoAssign
+	if type(originalAutoAssign) == "function" then
+		pallyPower.AutoAssign = function(target, ...)
+			local result = originalAutoAssign(target, ...)
+			if not PPA:IsSimulationActive() then
+				PPA:NoteLocalAssignmentAction("Auto-Assign")
+			end
+			return result
+		end
+	end
+end
+
 function PPA:OpenAssignmentFrame()
 	if not _G.PallyPower then
 		Print("PallyPower is required.")
@@ -3160,6 +3486,9 @@ function PPA:ApplyPlan(plan, context)
 		if paladin.hasAddon then
 			auraAssignments[paladin.name] = SafeNumber(plan.auraAssignments and plan.auraAssignments[paladin.name], 0)
 		end
+	end
+	if not simulation then
+		self:NoteLocalAssignmentAction("Smart-Assign")
 	end
 
 	local function afterAssignments()
@@ -3533,6 +3862,7 @@ function PPA:HookPallyPower()
 	end
 	self:HookAssignmentAlerts()
 	self:InstallSimulationHooks()
+	self:InstallAssignmentActionHooks()
 	if self.hookedPallyPower then
 		return
 	end
@@ -3553,6 +3883,9 @@ function PPA:ShowHelp()
 	Print("/ppa debug - toggle debug reasoning")
 	Print("/ppa debug on - enable debug reasoning")
 	Print("/ppa debug off - disable debug reasoning")
+	Print("/ppa trace - toggle PallyPower assignment trace")
+	Print("/ppa trace on - show who changes raid assignments")
+	Print("/ppa trace off - disable assignment trace")
 	Print("/ppa sound - toggle one-minute buff warning sound")
 	Print("/ppa specs - choose uncertain roles/specs manually")
 end
@@ -3571,6 +3904,16 @@ function PPA:HandleSlash(input)
 	elseif input == "debug off" then
 		self:EnsureDB().debug = false
 		Print("Debug disabled.")
+	elseif input == "trace" then
+		local db = self:EnsureDB()
+		db.assignmentTrace = not db.assignmentTrace
+		Print("Assignment trace " .. (db.assignmentTrace and "enabled." or "disabled."))
+	elseif input == "trace on" then
+		self:EnsureDB().assignmentTrace = true
+		Print("Assignment trace enabled.")
+	elseif input == "trace off" then
+		self:EnsureDB().assignmentTrace = false
+		Print("Assignment trace disabled.")
 	elseif input == "sound" then
 		local db = self:EnsureDB()
 		db.buffWarningSound = not db.buffWarningSound

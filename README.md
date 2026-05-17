@@ -12,7 +12,7 @@
 - Alerts you when another paladin changes your assignments
 - Plays a one-minute warning sound when one of your assigned blessings is about to expire
 
-Current version: `0.1.20`
+Current version: `0.1.21`
 
 ## Smart Assign
 
@@ -43,6 +43,8 @@ Current version: `0.1.20`
 
 - Prints a local chat alert when another paladin assigns you a class-wide blessing
 - Prints a local chat alert when another paladin assigns you a single-target normal blessing
+- `/ppa trace on`: Temporarily show which paladin changes any raid assignment row
+- Warns automatically when another paladin overwrites assignments twice within five seconds of your assignment
 - Ignores assignment changes you make yourself
 
 ## Install
