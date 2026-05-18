@@ -264,6 +264,14 @@ local function LongBuffText(buff)
 	return LONG_BUFF_NAMES[buff] or BuffText(buff)
 end
 
+local function ReportBuffText(buff)
+	local spell = _G.PallyPower and _G.PallyPower.Spells and _G.PallyPower.Spells[buff]
+	if spell and spell ~= "" then
+		return spell
+	end
+	return LongBuffText(buff)
+end
+
 local function AuraText(aura)
 	return AURA_NAMES[aura] or ("Aura " .. tostring(aura))
 end
@@ -274,6 +282,10 @@ end
 
 local function ClassPluralText(classID)
 	return CLASS_PLURAL_NAMES[classID] or (ClassText(classID) .. "s")
+end
+
+local function JoinList(list)
+	return table.concat(list or {}, ", ")
 end
 
 local function IsLiveClient()
@@ -3359,6 +3371,7 @@ function PPA:RenderSimulationBlessingsGrid()
 			local button = _G[buttonName]
 			local unit = classRoster[playerID]
 			if button and unit then
+				self:InstallSimulationPlayerButtonWrapper(button)
 				local text = _G[buttonName .. "Text"]
 				if text and text.SetText then
 					local shortName = unit.name
@@ -3459,6 +3472,34 @@ function PPA:HandleSimulationPlayerButtonMouseWheel(button, delta)
 		_G.PallyPower:PerformPlayerCycle(delta, unit.name, classID)
 	end
 	return true
+end
+
+function PPA:InstallSimulationPlayerButtonWrapper(button)
+	if not button or button.ppaSimulationButtonHooked or type(button.SetScript) ~= "function" then
+		return
+	end
+	local originalClick = button.GetScript and button:GetScript("OnClick")
+	local originalWheel = button.GetScript and button:GetScript("OnMouseWheel")
+	button:SetScript("OnClick", function(selfButton, mouseButton, ...)
+		if PPA:IsSimulationActive() and PPA:HandleSimulationPlayerButtonClick(selfButton, mouseButton) then
+			return
+		end
+		if originalClick then
+			return originalClick(selfButton, mouseButton, ...)
+		end
+	end)
+	button:SetScript("OnMouseWheel", function(selfButton, delta, ...)
+		if PPA:IsSimulationActive() and PPA:HandleSimulationPlayerButtonMouseWheel(selfButton, delta) then
+			return
+		end
+		if originalWheel then
+			return originalWheel(selfButton, delta, ...)
+		end
+	end)
+	if button.EnableMouse then
+		button:EnableMouse(true)
+	end
+	button.ppaSimulationButtonHooked = true
 end
 
 function PPA:InstallSimulationFrameHooks()
@@ -3865,6 +3906,123 @@ function PPA:PrintManualAssignments(plan)
 	end
 end
 
+function PPA:GetBlessingsReportPaladinNames()
+	local names = {}
+	local seen = {}
+	local function add(name)
+		name = RemoveRealmName(name)
+		if name and name ~= "" and not seen[name] then
+			seen[name] = true
+			names[#names + 1] = name
+		end
+	end
+
+	for _, name in ipairs(_G.SyncList or {}) do
+		add(name)
+	end
+	for name in pairs(_G.AllPallys or {}) do
+		add(name)
+	end
+	for name in pairs(_G.PallyPower_Assignments or {}) do
+		add(name)
+	end
+	for name in pairs(_G.PallyPower_NormalAssignments or {}) do
+		add(name)
+	end
+	for name in pairs(_G.PallyPower_AuraAssignments or {}) do
+		add(name)
+	end
+	return names
+end
+
+function PPA:BuildLocalBlessingsReportLinesForPaladin(paladinName)
+	local grouped = {}
+	local buffs = {}
+	local function groupForBuff(buff)
+		buff = SafeNumber(buff, 0)
+		if buff <= 0 then
+			return nil
+		end
+		if not grouped[buff] then
+			grouped[buff] = {
+				classes = {},
+				singles = {},
+			}
+			buffs[#buffs + 1] = buff
+		end
+		return grouped[buff]
+	end
+
+	local greater = _G.PallyPower_Assignments and _G.PallyPower_Assignments[paladinName]
+	for classID = 1, self:GetMaxClasses() do
+		local buff = SafeNumber(greater and greater[classID], 0)
+		local group = groupForBuff(buff)
+		if group then
+			group.classes[#group.classes + 1] = ClassPluralText(classID)
+		end
+	end
+
+	local normal = _G.PallyPower_NormalAssignments and _G.PallyPower_NormalAssignments[paladinName]
+	if type(normal) == "table" then
+		for _, targets in pairs(normal) do
+			if type(targets) == "table" then
+				for targetName, buff in pairs(targets) do
+					buff = SafeNumber(buff, 0)
+					local group = groupForBuff(buff)
+					if group then
+						group.singles[#group.singles + 1] = targetName
+					end
+				end
+			end
+		end
+	end
+
+	local lines = {}
+	table.sort(buffs)
+	for _, buff in ipairs(buffs) do
+		local entry = grouped[buff]
+		table.sort(entry.singles)
+		local pieces = {}
+		if #entry.classes > 0 then
+			pieces[#pieces + 1] = JoinList(entry.classes)
+		end
+		if #entry.singles > 0 then
+			pieces[#pieces + 1] = "single " .. JoinList(entry.singles)
+		end
+		if #pieces > 0 then
+			lines[#lines + 1] = ReportBuffText(buff) .. ": " .. table.concat(pieces, "; ")
+		end
+	end
+
+	local aura = SafeNumber(_G.PallyPower_AuraAssignments and _G.PallyPower_AuraAssignments[paladinName], 0)
+	if aura > 0 then
+		lines[#lines + 1] = "Aura: " .. AuraText(aura)
+	end
+	if #lines == 0 then
+		lines[#lines + 1] = "No assignments."
+	end
+
+	return lines
+end
+
+function PPA:PrintLocalBlessingsReport()
+	local names = self:GetBlessingsReportPaladinNames()
+	Print("Blessings Report (local):")
+	if #names == 0 then
+		Print("  No paladin assignments are available.")
+		return true
+	end
+
+	for _, paladinName in ipairs(names) do
+		Print(paladinName .. ":")
+		for _, line in ipairs(self:BuildLocalBlessingsReportLinesForPaladin(paladinName)) do
+			Print("  " .. line)
+		end
+	end
+	Print("End of local Blessings Report.")
+	return true
+end
+
 function PPA:PrintDebugPlan(plan, context)
 	if not self:IsDebugEnabled() then
 		return
@@ -3922,6 +4080,27 @@ function PPA:WarnSmartAssignRaidAuthority()
 	Print("Smart-Assign warning: without raid leader or assistant, other clients may only accept changes to your own paladin row.")
 	Print("Ask for assist or lead before broadcasting a full raid plan.")
 	return true
+end
+
+function PPA:ShouldUseLocalBlessingsReport()
+	return self:IsSimulationActive()
+		or (self:IsInRaidGroup() and not self:IsLocalRaidLeaderOrAssistant())
+end
+
+function PPA:InstallLocalReportHook()
+	local pallyPower = _G.PallyPower
+	if not pallyPower or self.localReportHookInstalledFor == pallyPower or type(pallyPower.Report) ~= "function" then
+		return
+	end
+	self.localReportHookInstalledFor = pallyPower
+
+	local originalReport = pallyPower.Report
+	pallyPower.Report = function(target, ...)
+		if PPA:ShouldUseLocalBlessingsReport() then
+			return PPA:PrintLocalBlessingsReport()
+		end
+		return originalReport(target, ...)
+	end
 end
 
 function PPA:CanRunSmartAssign()
@@ -4246,6 +4425,7 @@ function PPA:HookPallyPower()
 	self:HookAssignmentAlerts()
 	self:InstallSimulationHooks()
 	self:InstallAssignmentActionHooks()
+	self:InstallLocalReportHook()
 	if self.hookedPallyPower then
 		return
 	end
@@ -4457,6 +4637,15 @@ PPA._test = {
 	end,
 	ShouldWarnSmartAssignRaidAuthority = function()
 		return PPA:ShouldWarnSmartAssignRaidAuthority()
+	end,
+	ShouldUseLocalBlessingsReport = function()
+		return PPA:ShouldUseLocalBlessingsReport()
+	end,
+	PrintLocalBlessingsReport = function()
+		return PPA:PrintLocalBlessingsReport()
+	end,
+	InstallLocalReportHook = function()
+		return PPA:InstallLocalReportHook()
 	end,
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)

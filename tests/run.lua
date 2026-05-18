@@ -1405,6 +1405,7 @@ end)
 test("simulation assignment grid renders individual class members", function()
 	local old = {
 		PallyPower = _G.PallyPower,
+		PallyPowerGrid_NormalBlessingMenu = _G.PallyPowerGrid_NormalBlessingMenu,
 		PallyPowerBlessingsFrame = _G.PallyPowerBlessingsFrame,
 		PallyPowerBlessingsFramePlayer1 = _G.PallyPowerBlessingsFramePlayer1,
 		PallyPowerBlessingsFrameAuraGroup1Line = _G.PallyPowerBlessingsFrameAuraGroup1Line,
@@ -1417,15 +1418,20 @@ test("simulation assignment grid renders individual class members", function()
 		simulation = PPA.simulation,
 	}
 	local touched = {}
+	local clicked
 
 	local function frame(name)
-		local f = {name = name, shown = nil}
+		local f = {name = name, shown = nil, scripts = {}}
 		function f:SetTexture(value) self.texture = value end
 		function f:SetText(value) self.text = value end
 		function f:SetScale(value) self.scale = value end
 		function f:SetHeight(value) self.height = value end
 		function f:SetPoint(...) self.point = {...} end
 		function f:SetChecked(value) self.checked = value end
+		function f:SetScript(event, script) self.scripts[event] = script end
+		function f:GetScript(event) return self.scripts[event] end
+		function f:GetName() return self.name end
+		function f:EnableMouse(value) self.mouseEnabled = value end
 		function f:Show() self.shown = true end
 		function f:Hide() self.shown = false end
 		function f:IsVisible() return true end
@@ -1453,6 +1459,9 @@ test("simulation assignment grid renders individual class members", function()
 	_G.PallyPower_NormalAssignments = {PpaSimHoly = {[1] = {}}}
 	_G.PallyPower_Assignments = {PpaSimHoly = {[1] = T.BUFF_SALVATION}}
 	_G.SyncList = {"PpaSimHoly", "PpaSimProt1", "PpaSimRet1"}
+	_G.PallyPowerGrid_NormalBlessingMenu = function(button, mouseButton, name, classID)
+		clicked = {button = button, mouseButton = mouseButton, name = name, classID = classID}
+	end
 	_G.PallyPower = {
 		player = "PpaSimHoly",
 		opt = {configscale = 0.9, freeassign = true},
@@ -1482,11 +1491,15 @@ test("simulation assignment grid renders individual class members", function()
 	assertEquals(_G.PallyPowerBlessingsFrameClassGroup1ClassButtonIcon.texture, "warrior-icon", "class icon should render")
 	assertEquals(_G.PallyPowerBlessingsFrame.height > 14 + 24 + 56 + (3 * 100) + 22, true, "frame should grow for simulated members")
 	assertEquals(_G.PallyPowerBlessingsFrameFreeAssign.checked, true, "free assign checkbox should track simulation option")
+	_G.PallyPowerBlessingsFrameClassGroup1PlayerButton1.scripts.OnClick(_G.PallyPowerBlessingsFrameClassGroup1PlayerButton1, "LeftButton")
+	assertEquals(clicked.name, firstWarrior.name, "rendered button wrapper should target simulated warrior")
+	assertEquals(clicked.classID, 1, "rendered button wrapper should preserve class ID")
 
 	for _, name in ipairs(touched) do
 		_G[name] = old[name]
 	end
 	_G.PallyPower = old.PallyPower
+	_G.PallyPowerGrid_NormalBlessingMenu = old.PallyPowerGrid_NormalBlessingMenu
 	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
 	_G.PallyPower_Assignments = old.PallyPower_Assignments
 	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
@@ -1734,6 +1747,211 @@ test("smart assign does not warn raid assistants about own-row limits", function
 	_G.IsInRaid = old.IsInRaid
 	_G.UnitIsGroupLeader = old.UnitIsGroupLeader
 	_G.UnitIsGroupAssistant = old.UnitIsGroupAssistant
+	PPA.simulation = old.simulation
+end)
+
+test("local blessings report groups classes and single overrides by blessing", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_AuraAssignments = _G.PallyPower_AuraAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		SyncList = _G.SyncList,
+		AllPallys = _G.AllPallys,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+	}
+	local messages = {}
+
+	_G.PallyPower = {
+		Spells = {
+			[T.BUFF_WISDOM] = "Blessing of Wisdom",
+			[T.BUFF_KINGS] = "Blessing of Kings",
+			[T.BUFF_LIGHT] = "Blessing of Light",
+			[T.BUFF_SANCTUARY] = "Blessing of Sanctuary",
+		},
+	}
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.SyncList = {"Holyone", "Retadin"}
+	_G.AllPallys = {Holyone = {}, Retadin = {}}
+	_G.PallyPower_Assignments = {
+		Holyone = {
+			[1] = T.BUFF_KINGS,
+			[2] = T.BUFF_KINGS,
+			[3] = T.BUFF_WISDOM,
+		},
+		Retadin = {
+			[5] = T.BUFF_LIGHT,
+			[6] = T.BUFF_LIGHT,
+		},
+	}
+	_G.PallyPower_NormalAssignments = {
+		Holyone = {
+			[3] = {Prayer = T.BUFF_WISDOM},
+			[5] = {Retadin = T.BUFF_LIGHT},
+		},
+		Retadin = {
+			[1] = {Shieldwall = T.BUFF_SANCTUARY},
+			[5] = {Retadin = T.BUFF_LIGHT},
+		},
+	}
+	_G.PallyPower_AuraAssignments = {
+		Holyone = T.AURA_DEVOTION,
+		Retadin = 0,
+	}
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+
+	T.PrintLocalBlessingsReport()
+
+	assertEquals(messages[1], "|cff33ff99PPA|r: Blessings Report (local):", "report title")
+	assertEquals(messages[2], "|cff33ff99PPA|r: Holyone:", "first paladin header")
+	assertEquals(messages[3], "|cff33ff99PPA|r:   Blessing of Wisdom: Priests; single Prayer", "wisdom grouped line")
+	assertEquals(messages[4], "|cff33ff99PPA|r:   Blessing of Kings: Warriors, Rogues", "kings grouped line")
+	assertEquals(messages[5], "|cff33ff99PPA|r:   Blessing of Light: single Retadin", "single light line")
+	assertEquals(messages[6], "|cff33ff99PPA|r:   Aura: Devotion Aura", "aura line")
+	assertEquals(messages[7], "|cff33ff99PPA|r: Retadin:", "second paladin header")
+	assertEquals(messages[8], "|cff33ff99PPA|r:   Blessing of Light: Paladins, Hunters; single Retadin", "ret light grouped line")
+	assertEquals(messages[9], "|cff33ff99PPA|r:   Blessing of Sanctuary: single Shieldwall", "ret single sanctuary line")
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_AuraAssignments = old.PallyPower_AuraAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.SyncList = old.SyncList
+	_G.AllPallys = old.AllPallys
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+end)
+
+test("blessings report hook prints local report for non-assist raids", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_AuraAssignments = _G.PallyPower_AuraAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		SyncList = _G.SyncList,
+		AllPallys = _G.AllPallys,
+		IsInRaid = _G.IsInRaid,
+		UnitIsGroupLeader = _G.UnitIsGroupLeader,
+		UnitIsGroupAssistant = _G.UnitIsGroupAssistant,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+		localReportHookInstalledFor = PPA.localReportHookInstalledFor,
+		simulation = PPA.simulation,
+	}
+	local messages = {}
+	local reportCalls = 0
+
+	PPA.localReportHookInstalledFor = nil
+	PPA.simulation = nil
+	_G.PallyPower = {
+		player = "Holyone",
+		Spells = {[T.BUFF_KINGS] = "Blessing of Kings"},
+		Report = function()
+			reportCalls = reportCalls + 1
+		end,
+		CheckLeader = function()
+			return false
+		end,
+	}
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.SyncList = {"Holyone"}
+	_G.AllPallys = {Holyone = {}}
+	_G.PallyPower_Assignments = {Holyone = {[1] = T.BUFF_KINGS}}
+	_G.PallyPower_NormalAssignments = {Holyone = {}}
+	_G.PallyPower_AuraAssignments = {Holyone = 0}
+	_G.IsInRaid = function()
+		return true
+	end
+	_G.UnitIsGroupLeader = function()
+		return false
+	end
+	_G.UnitIsGroupAssistant = function()
+		return false
+	end
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+
+	T.InstallLocalReportHook()
+	_G.PallyPower:Report()
+
+	assertEquals(reportCalls, 0, "original report should not run for non-assist raid")
+	assertEquals(messages[1], "|cff33ff99PPA|r: Blessings Report (local):", "local report should print")
+	assertEquals(messages[3], "|cff33ff99PPA|r:   Blessing of Kings: Warriors", "local report should include assignments")
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_AuraAssignments = old.PallyPower_AuraAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.SyncList = old.SyncList
+	_G.AllPallys = old.AllPallys
+	_G.IsInRaid = old.IsInRaid
+	_G.UnitIsGroupLeader = old.UnitIsGroupLeader
+	_G.UnitIsGroupAssistant = old.UnitIsGroupAssistant
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+	PPA.localReportHookInstalledFor = old.localReportHookInstalledFor
+	PPA.simulation = old.simulation
+end)
+
+test("blessings report hook leaves leader reports to PallyPower", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		IsInRaid = _G.IsInRaid,
+		UnitIsGroupLeader = _G.UnitIsGroupLeader,
+		UnitIsGroupAssistant = _G.UnitIsGroupAssistant,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+		localReportHookInstalledFor = PPA.localReportHookInstalledFor,
+		simulation = PPA.simulation,
+	}
+	local messages = {}
+	local reportCalls = 0
+
+	PPA.localReportHookInstalledFor = nil
+	PPA.simulation = nil
+	_G.PallyPower = {
+		player = "Holyone",
+		Report = function()
+			reportCalls = reportCalls + 1
+		end,
+		CheckLeader = function()
+			return true
+		end,
+	}
+	_G.IsInRaid = function()
+		return true
+	end
+	_G.UnitIsGroupLeader = function()
+		return true
+	end
+	_G.UnitIsGroupAssistant = function()
+		return false
+	end
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+
+	T.InstallLocalReportHook()
+	_G.PallyPower:Report()
+
+	assertEquals(reportCalls, 1, "leader report should pass through to PallyPower")
+	assertEquals(#messages, 0, "leader report should not print local fallback")
+
+	_G.PallyPower = old.PallyPower
+	_G.IsInRaid = old.IsInRaid
+	_G.UnitIsGroupLeader = old.UnitIsGroupLeader
+	_G.UnitIsGroupAssistant = old.UnitIsGroupAssistant
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+	PPA.localReportHookInstalledFor = old.localReportHookInstalledFor
 	PPA.simulation = old.simulation
 end)
 

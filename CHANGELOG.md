@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.1.24] - 2026-05-18
+
+### Changed
+- Blessings Report now prints a local PPA report in simulation or when the player is in a raid without leader or assistant.
+- Local blessing reports are grouped per paladin and per blessing, with class-wide targets and single-target overrides on separate readable lines.
+
+### Fixed
+- Simulated assignment member buttons now install direct click and mouse-wheel wrappers while rendered, so every simulated class member row can open or cycle normal blessing overrides.
+
+### Tests
+- Add coverage for local blessing report grouping, non-assist report interception, leader report passthrough, and direct simulated member button wrappers.
+
 ## [0.1.23] - 2026-05-18
 
 ### Fixed
