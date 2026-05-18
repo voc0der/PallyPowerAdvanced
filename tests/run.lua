@@ -1296,6 +1296,20 @@ test("simulation prot paladin provides blessing of sanctuary", function()
 	end
 end)
 
+test("simulation paladin tank keeps improved wisdom and gets light from ret", function()
+	local context = T.BuildSimulationContext(1)
+	local plan = T.BuildSmartPlan(context)
+
+	assertEquals(plan.assignments.PpaSimHoly[5], T.BUFF_WISDOM, "holy paladin should keep improved wisdom on paladins")
+	assertEquals(
+		plan.normalAssignments.PpaSimHoly and plan.normalAssignments.PpaSimHoly[5] and plan.normalAssignments.PpaSimHoly[5].PpaSimProt1,
+		nil,
+		"holy wisdom should not be replaced by a light override on the prot paladin"
+	)
+	assertEquals(plan.normalAssignments.PpaSimProt1[5].PpaSimProt1, T.BUFF_SANCTUARY, "prot paladin should still self-cover sanctuary")
+	assertEquals(plan.normalAssignments.PpaSimRet1[5].PpaSimProt1, T.BUFF_LIGHT, "ret paladin should replace useless salvation with light")
+end)
+
 test("last pass simplifies prot toward kings without downgrading improved sanctuary", function()
 	local context = T.BuildSimulationContext(1)
 	local plan = T.BuildSmartPlan(context)
@@ -1431,7 +1445,13 @@ test("simulation assignment grid renders individual class members", function()
 		function f:SetScript(event, script) self.scripts[event] = script end
 		function f:GetScript(event) return self.scripts[event] end
 		function f:GetName() return self.name end
+		function f:Enable() self.enabled = true end
 		function f:EnableMouse(value) self.mouseEnabled = value end
+		function f:RegisterForClicks(...) self.registeredClicks = {...} end
+		function f:EnableMouseWheel(value) self.mouseWheelEnabled = value end
+		function f:GetParent() return _G.PallyPowerBlessingsFrame end
+		function f:GetFrameLevel() return self.frameLevel or 1 end
+		function f:SetFrameLevel(value) self.frameLevel = value end
 		function f:Show() self.shown = true end
 		function f:Hide() self.shown = false end
 		function f:IsVisible() return true end
@@ -1494,6 +1514,20 @@ test("simulation assignment grid renders individual class members", function()
 	_G.PallyPowerBlessingsFrameClassGroup1PlayerButton1.scripts.OnClick(_G.PallyPowerBlessingsFrameClassGroup1PlayerButton1, "LeftButton")
 	assertEquals(clicked.name, firstWarrior.name, "rendered button wrapper should target simulated warrior")
 	assertEquals(clicked.classID, 1, "rendered button wrapper should preserve class ID")
+	local secondPaladin = T.GetSimulationClassUnit(5, 2)
+	local secondPaladinButton = _G.PallyPowerBlessingsFrameClassGroup5PlayerButton2
+	assertEquals(secondPaladinButton.enabled, true, "simulated member buttons should be enabled")
+	assertEquals(secondPaladinButton.mouseEnabled, true, "simulated member buttons should accept mouse input")
+	assertEquals(secondPaladinButton.mouseWheelEnabled, true, "simulated member buttons should accept mouse wheel input")
+	assertEquals(secondPaladinButton.registeredClicks[1], "LeftButtonUp", "simulated member buttons should register left clicks")
+	assertEquals(secondPaladinButton.registeredClicks[2], "RightButtonUp", "simulated member buttons should register right clicks")
+	secondPaladinButton:SetScript("OnClick", function()
+		error("overwritten PallyPower script should be rewrapped during simulation render")
+	end)
+	assertEquals(T.RenderSimulationBlessingsGrid(), true, "simulation grid re-render should run")
+	secondPaladinButton.scripts.OnClick(secondPaladinButton, "RightButton")
+	assertEquals(clicked.name, secondPaladin.name, "rewrapped non-local paladin button should target simulated member")
+	assertEquals(clicked.classID, 5, "rewrapped non-local paladin button should preserve class ID")
 
 	for _, name in ipairs(touched) do
 		_G[name] = old[name]

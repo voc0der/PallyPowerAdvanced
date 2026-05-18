@@ -582,12 +582,18 @@ function PPA:GetBasePriorityForUnit(unit, context)
 			local specData = self:GetUnitSpecData(unit.name)
 			if specData then
 				if (specData.sanctityAura or 0) > 0 then
+					if improvedWisdom or targetHasImprovedWisdom then
+						return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_LIGHT, BUFF_KINGS, BUFF_MIGHT)
+					end
 					return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_KINGS, BUFF_LIGHT, BUFF_WISDOM, BUFF_MIGHT)
 				end
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_LIGHT, BUFF_MIGHT)
 			end
 			if (context and context.pallyCount or 0) <= 2 then
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_LIGHT, BUFF_MIGHT)
+			end
+			if improvedWisdom or targetHasImprovedWisdom then
+				return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_LIGHT, BUFF_KINGS, BUFF_MIGHT)
 			end
 			return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_KINGS, BUFF_LIGHT, BUFF_WISDOM, BUFF_MIGHT)
 		elseif role == ROLE_HEALER or targetHasImprovedWisdom then
@@ -3474,30 +3480,72 @@ function PPA:HandleSimulationPlayerButtonMouseWheel(button, delta)
 	return true
 end
 
-function PPA:InstallSimulationPlayerButtonWrapper(button)
-	if not button or button.ppaSimulationButtonHooked or type(button.SetScript) ~= "function" then
-		return
+local function ConfigureSimulationPlayerButton(button)
+	if button.Enable then
+		button:Enable()
 	end
-	local originalClick = button.GetScript and button:GetScript("OnClick")
-	local originalWheel = button.GetScript and button:GetScript("OnMouseWheel")
-	button:SetScript("OnClick", function(selfButton, mouseButton, ...)
-		if PPA:IsSimulationActive() and PPA:HandleSimulationPlayerButtonClick(selfButton, mouseButton) then
-			return
-		end
-		if originalClick then
-			return originalClick(selfButton, mouseButton, ...)
-		end
-	end)
-	button:SetScript("OnMouseWheel", function(selfButton, delta, ...)
-		if PPA:IsSimulationActive() and PPA:HandleSimulationPlayerButtonMouseWheel(selfButton, delta) then
-			return
-		end
-		if originalWheel then
-			return originalWheel(selfButton, delta, ...)
-		end
-	end)
 	if button.EnableMouse then
 		button:EnableMouse(true)
+	end
+	if button.RegisterForClicks then
+		button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	end
+	if button.EnableMouseWheel then
+		button:EnableMouseWheel(true)
+	end
+	if button.SetFrameLevel and button.GetParent then
+		local parent = button:GetParent()
+		if parent and parent.GetFrameLevel then
+			local parentLevel = parent:GetFrameLevel()
+			if parentLevel then
+				button:SetFrameLevel(parentLevel + 10)
+			end
+		end
+	end
+end
+
+function PPA:InstallSimulationPlayerButtonWrapper(button)
+	if not button or type(button.SetScript) ~= "function" then
+		return
+	end
+	ConfigureSimulationPlayerButton(button)
+
+	local currentClick = button.GetScript and button:GetScript("OnClick")
+	if not button.ppaSimulationButtonClickWrapper then
+		button.ppaSimulationButtonOriginalClick = currentClick
+		button.ppaSimulationButtonClickWrapper = function(selfButton, mouseButton, ...)
+			if PPA:IsSimulationActive() and PPA:HandleSimulationPlayerButtonClick(selfButton, mouseButton) then
+				return
+			end
+			local originalClick = selfButton.ppaSimulationButtonOriginalClick
+			if originalClick then
+				return originalClick(selfButton, mouseButton, ...)
+			end
+		end
+	elseif currentClick and currentClick ~= button.ppaSimulationButtonClickWrapper then
+		button.ppaSimulationButtonOriginalClick = currentClick
+	end
+	if currentClick ~= button.ppaSimulationButtonClickWrapper then
+		button:SetScript("OnClick", button.ppaSimulationButtonClickWrapper)
+	end
+
+	local currentWheel = button.GetScript and button:GetScript("OnMouseWheel")
+	if not button.ppaSimulationButtonWheelWrapper then
+		button.ppaSimulationButtonOriginalWheel = currentWheel
+		button.ppaSimulationButtonWheelWrapper = function(selfButton, delta, ...)
+			if PPA:IsSimulationActive() and PPA:HandleSimulationPlayerButtonMouseWheel(selfButton, delta) then
+				return
+			end
+			local originalWheel = selfButton.ppaSimulationButtonOriginalWheel
+			if originalWheel then
+				return originalWheel(selfButton, delta, ...)
+			end
+		end
+	elseif currentWheel and currentWheel ~= button.ppaSimulationButtonWheelWrapper then
+		button.ppaSimulationButtonOriginalWheel = currentWheel
+	end
+	if currentWheel ~= button.ppaSimulationButtonWheelWrapper then
+		button:SetScript("OnMouseWheel", button.ppaSimulationButtonWheelWrapper)
 	end
 	button.ppaSimulationButtonHooked = true
 end

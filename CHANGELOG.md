@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+## [0.1.25] - 2026-05-18
+
+### Changed
+- Paladin tanks now preserve improved Blessing of Wisdom ahead of Light and Kings when enough paladins are available, so a single-target Light override is assigned from a less useful base blessing instead of replacing improved Wisdom.
+
+### Fixed
+- Simulated member buttons are re-enabled, registered for left/right click-up events, mouse-wheel enabled, and rewrapped on render so non-local simulated members remain clickable after PallyPower refreshes the grid.
+
+### Tests
+- Add coverage for simulated paladin tank override ownership and rewrapping non-local simulated member buttons.
+
 ## [0.1.24] - 2026-05-18
 
 ### Changed
