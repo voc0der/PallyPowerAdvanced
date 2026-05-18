@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.1.26] - 2026-05-18
+
+### Fixed
+- Treat Blessing of Sanctuary as talent-gated for addon paladins, so Holy and Retribution paladins are no longer considered valid Sanctuary casters from stale rank data alone.
+- Simulated Holy and Retribution paladins no longer seed Sanctuary as a learned blessing, keeping both the planner and PallyPower skill display honest.
+
+### Tests
+- Replace the old plain-Sanctuary fallback expectation with coverage that non-Protection paladins do not receive Sanctuary assignments.
+
 ## [0.1.25] - 2026-05-18
 
 ### Changed

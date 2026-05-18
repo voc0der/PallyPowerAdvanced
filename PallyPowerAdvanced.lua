@@ -676,7 +676,11 @@ function PPA:CanPaladinBuff(paladin, buff)
 	end
 
 	if paladin.hasAddon then
-		return SkillRank(SkillForBuff(paladin, buff)) > 0
+		local skill = SkillForBuff(paladin, buff)
+		if buff == BUFF_SANCTUARY then
+			return SkillRank(skill) > 0 and SkillTalent(skill) > 0
+		end
+		return SkillRank(skill) > 0
 	end
 
 	local role = NormalizeRole(paladin.role)
@@ -2322,6 +2326,9 @@ function PPA:BuildPaladinSkills(name)
 			end
 		end
 	end
+	if skills[BUFF_SANCTUARY] and SkillTalent(skills[BUFF_SANCTUARY]) <= 0 then
+		skills[BUFF_SANCTUARY] = nil
+	end
 
 	return skills
 end
@@ -2350,6 +2357,7 @@ local SPEC_TALENT_NAMES = {
 	["Improved Blessing of Might"]     = "impMight",
 	["Improved Blessing of Wisdom"]    = "impWisdom",
 	["Improved Blessing of Sanctuary"] = "impSanc",
+	["Blessing of Sanctuary"]          = "impSanc",
 	["Blessing of Kings"]              = "kings",
 	["Sanctity Aura"]                  = "sanctityAura",
 	["Holy Shield"]                    = "holyShield",
@@ -2625,8 +2633,10 @@ function PPA:BuildSimulationPaladinSkills(role)
 		[BUFF_KINGS] = {rank = 1, talent = 0},
 		[BUFF_SALVATION] = {rank = 1, talent = 0},
 		[BUFF_LIGHT] = {rank = 4, talent = 0},
-		[BUFF_SANCTUARY] = {rank = 5, talent = role == ROLE_TANK and 2 or 0},
 	}
+	if role == ROLE_TANK then
+		skills[BUFF_SANCTUARY] = {rank = 5, talent = 2}
+	end
 	return skills
 end
 

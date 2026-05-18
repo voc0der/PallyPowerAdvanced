@@ -309,7 +309,7 @@ test("improved wisdom paladin is reserved for wisdom", function()
 	assertEquals(wisdomPaladin, "PpaSimHoly", "improved wisdom paladin should cover paladin wisdom")
 end)
 
-test("plain sanctuary paladin is fallback when no prot sanctuary exists", function()
+test("non-prot paladins are not sanctuary fallback", function()
 	local context = {
 		playerName = "Holyone",
 		pallyCount = 2,
@@ -326,7 +326,13 @@ test("plain sanctuary paladin is fallback when no prot sanctuary exists", functi
 	}
 
 	local plan = T.BuildSmartPlan(context)
-	assertEquals(plan.normalAssignments.Retadin[1].Shieldwall, T.BUFF_SANCTUARY, "plain sanctuary should be used when improved sanctuary is unavailable")
+	assertEquals(T.CanPaladinBuff(context.paladins[2], T.BUFF_SANCTUARY), false, "ret paladin should not cast sanctuary without the talent")
+	assertEquals(planContainsBuff(plan, T.BUFF_SANCTUARY), false, "sanctuary should not be assigned when no prot paladin has it")
+	assertEquals(
+		plan.normalAssignments.Retadin and plan.normalAssignments.Retadin[1] and plan.normalAssignments.Retadin[1].Shieldwall,
+		nil,
+		"ret paladin should not receive a sanctuary override"
+	)
 end)
 
 test("uncertain damage druid and shaman are reported for manual choice", function()
@@ -1256,7 +1262,8 @@ test("simulation prot paladin provides blessing of sanctuary", function()
 			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_SANCTUARY), true, "prot paladin can cast sanctuary")
 		end
 		if paladin.name == "PpaSimRet1" then
-			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_SANCTUARY), true, "ret paladin can cast plain sanctuary")
+			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_SANCTUARY), false, "ret paladin should not cast sanctuary")
+			assertEquals(paladin.skills[T.BUFF_SANCTUARY], nil, "ret paladin should not model sanctuary as learned")
 			assertEquals(paladin.skills[T.BUFF_MIGHT].talent, 2, "ret paladin should model improved might")
 		end
 	end
@@ -1292,6 +1299,38 @@ test("simulation prot paladin provides blessing of sanctuary", function()
 				end
 			end
 			assertEquals(hasSanctuary, true, unit.name .. " should have sanctuary coverage")
+		end
+	end
+end)
+
+test("simulation never assigns sanctuary to non-prot paladins", function()
+	for seed = 1, 40 do
+		local context = T.BuildSimulationContext(seed)
+		local plan = T.BuildSmartPlan(context)
+		local roles = {}
+		for _, paladin in ipairs(context.paladins) do
+			roles[paladin.name] = paladin.role
+		end
+
+		for paladinName, classMap in pairs(plan.assignments or {}) do
+			for classID, buff in pairs(classMap or {}) do
+				if buff == T.BUFF_SANCTUARY then
+					assertEquals(roles[paladinName], "TANK", "seed " .. seed .. " class " .. classID .. " sanctuary caster")
+				end
+			end
+		end
+		for paladinName, classMap in pairs(plan.normalAssignments or {}) do
+			for classID, targets in pairs(classMap or {}) do
+				for targetName, buff in pairs(targets or {}) do
+					if buff == T.BUFF_SANCTUARY then
+						assertEquals(
+							roles[paladinName],
+							"TANK",
+							"seed " .. seed .. " class " .. classID .. " target " .. targetName .. " sanctuary caster"
+						)
+					end
+				end
+			end
 		end
 	end
 end)
