@@ -1314,6 +1314,39 @@ local function PlanHasNormalBuff(plan, classID, targetName, buff)
 	return false
 end
 
+local function PlanTargetHasBuff(plan, classID, targetName, buff)
+	for paladinName, classMap in pairs(plan.assignments or {}) do
+		local normal = plan.normalAssignments
+			and plan.normalAssignments[paladinName]
+			and plan.normalAssignments[paladinName][classID]
+			and plan.normalAssignments[paladinName][classID][targetName]
+		if normal then
+			if normal == buff then
+				return true
+			end
+		elseif classMap and classMap[classID] == buff then
+			return true
+		end
+	end
+
+	for _, manual in pairs(plan.manualAssignments or {}) do
+		local normalBuff
+		for _, normal in ipairs(manual.normal or {}) do
+			if normal.classID == classID and normal.targetName == targetName then
+				normalBuff = normal.buff
+			end
+		end
+		if normalBuff then
+			if normalBuff == buff then
+				return true
+			end
+		elseif manual.greater and manual.greater[classID] == buff then
+			return true
+		end
+	end
+	return false
+end
+
 function PPA:FindBestPaladinForUnassignedNormal(context, buff)
 	local bestPaladin
 	local bestScore = -100000
@@ -1327,6 +1360,63 @@ function PPA:FindBestPaladinForUnassignedNormal(context, buff)
 		end
 	end
 	return bestPaladin
+end
+
+function PPA:FindBestPaladinForTankLightOverride(context, plan, classID, targetName, priority)
+	local lightIndex = PriorityIndex(priority, BUFF_LIGHT)
+	if not lightIndex then
+		return nil
+	end
+
+	local bestCandidate
+	for _, paladin in ipairs(context.paladins or {}) do
+		if self:CanPaladinBuff(paladin, BUFF_LIGHT) then
+			local currentBuff = 0
+			if paladin.hasAddon then
+				currentBuff = plan.assignments
+					and plan.assignments[paladin.name]
+					and plan.assignments[paladin.name][classID]
+					or 0
+				local normal = plan.normalAssignments
+					and plan.normalAssignments[paladin.name]
+					and plan.normalAssignments[paladin.name][classID]
+					and plan.normalAssignments[paladin.name][classID][targetName]
+				if normal then
+					currentBuff = normal
+				end
+			else
+				local manual = plan.manualAssignments and plan.manualAssignments[paladin.name]
+				currentBuff = manual and manual.greater and manual.greater[classID] or 0
+				for _, normal in ipairs((manual and manual.normal) or {}) do
+					if normal.classID == classID and normal.targetName == targetName then
+						currentBuff = normal.buff
+					end
+				end
+			end
+
+			local currentIndex = PriorityIndex(priority, currentBuff) or 999
+			if currentIndex > lightIndex then
+				local candidate = {
+					paladin = paladin,
+					currentBuff = currentBuff,
+					currentIndex = currentIndex,
+					score = self:ScorePaladinForBuff(paladin, BUFF_LIGHT),
+				}
+				if not bestCandidate
+					or candidate.currentIndex > bestCandidate.currentIndex
+					or (candidate.currentIndex == bestCandidate.currentIndex and candidate.score > bestCandidate.score)
+					or (
+						candidate.currentIndex == bestCandidate.currentIndex
+						and candidate.score == bestCandidate.score
+						and candidate.paladin.name < bestCandidate.paladin.name
+					)
+				then
+					bestCandidate = candidate
+				end
+			end
+		end
+	end
+	return bestCandidate
 end
 
 function PPA:ApplyTankSanctuaryFallbacks(context, classID, members, selected, plan)
@@ -1363,6 +1453,32 @@ function PPA:ApplyTankSanctuaryFallbacks(context, classID, members, selected, pl
 							BuffText(BUFF_SANCTUARY)
 						)
 					end
+				end
+			end
+		end
+	end
+end
+
+function PPA:ApplyTankLightFallbacks(context, classID, members, plan)
+	if not (context and context.healingPaladinPresent) then
+		return
+	end
+
+	for _, unit in ipairs(members or {}) do
+		if NormalizeRole(unit.role) == ROLE_TANK and not PlanTargetHasBuff(plan, classID, unit.name, BUFF_LIGHT) then
+			local priority = unit.priority or self:GetPriorityForUnit(unit, context)
+			if PriorityIndex(priority, BUFF_LIGHT) then
+				local candidate = self:FindBestPaladinForTankLightOverride(context, plan, classID, unit.name, priority)
+				if candidate then
+					SetPlanNormal(plan, candidate.paladin, classID, unit.name, BUFF_LIGHT, candidate.currentBuff)
+					plan.debugLines[#plan.debugLines + 1] = string.format(
+						"%s: %s adds single-target %s for tank healing because %s priority is %s.",
+						unit.name,
+						candidate.paladin.name,
+						BuffText(BUFF_LIGHT),
+						RoleText(unit.role),
+						JoinBuffs(priority)
+					)
 				end
 			end
 		end
@@ -1563,6 +1679,7 @@ function PPA:BuildSmartPlan(context)
 		if not assumed then
 			self:ApplyPlayerOverrides(context, classID, members, selected, plan)
 			self:ApplyTankSanctuaryFallbacks(context, classID, members, selected, plan)
+			self:ApplyTankLightFallbacks(context, classID, members, plan)
 		end
 	end
 

@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.27] - 2026-05-18
+
+### Changed
+- Tanks now get an explicit single-target Blessing of Light fallback when a healer paladin is present and their current class blessing would otherwise leave them with a lower-priority option such as Might.
+
+### Tests
+- Add coverage that warrior tanks receive Light over Might while DPS warriors keep their class-wide Might assignment.
+
 ## [0.1.26] - 2026-05-18
 
 ### Fixed

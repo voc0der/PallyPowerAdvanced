@@ -135,6 +135,31 @@ test("warrior tank gets normal sanctuary instead of class salvation", function()
 	assertEquals(plan.normalAssignments.Tankadin[1].Shieldwall, T.BUFF_SANCTUARY, "warrior tank should receive sanctuary override")
 end)
 
+test("warrior tank gets light over might when a holy paladin is present", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 3,
+		healingPaladinPresent = true,
+		improvedWisdomPaladinPresent = true,
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 2), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Tankadin", role = "TANK", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4), [T.BUFF_SANCTUARY] = skill(5, 2)}},
+			{name = "Retadin", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+		},
+		players = {
+			{name = "Shieldwall", class = "WARRIOR", classID = 1, role = "TANK"},
+			{name = "Slammer", class = "WARRIOR", classID = 1, role = "DAMAGER"},
+			{name = "Cleave", class = "WARRIOR", classID = 1, role = "DAMAGER"},
+			{name = "Whirl", class = "WARRIOR", classID = 1, role = "DAMAGER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Retadin[1], T.BUFF_MIGHT, "ret paladin should still cover warrior might class-wide")
+	assertEquals(plan.normalAssignments.Retadin[1].Shieldwall, T.BUFF_LIGHT, "warrior tank should receive light instead of might")
+	assertEquals(plan.normalAssignments.Retadin[1].Slammer, nil, "DPS warriors should keep class-wide might")
+end)
+
 test("pvp priority removes salvation and pushes sanctuary last", function()
 	local context = {pvpInstance = true, healingPaladinPresent = true, improvedWisdomPaladinPresent = true, pallyCount = 4}
 	local rogue = {name = "Sneaky", class = "ROGUE", classID = 2, role = "DAMAGER"}
