@@ -2787,6 +2787,9 @@ function PPA:GetSimulationUnit(identifier)
 	if not self:IsSimulationActive() then
 		return nil
 	end
+	if identifier == nil then
+		return nil
+	end
 	local simulation = self.simulation
 	return (simulation.unitsByToken and simulation.unitsByToken[identifier])
 		or (simulation.unitsByName and simulation.unitsByName[identifier])
@@ -2808,6 +2811,60 @@ function PPA:PrepareSimulationUnitMaps(context)
 	self.simulation.unitsByToken = unitsByToken
 	self.simulation.unitsByName = unitsByName
 	self.simulation.rosterByIndex = rosterByIndex
+	self:PrepareSimulationClassRoster(context)
+end
+
+function PPA:BuildSimulationClassRoster(context)
+	local roster = {}
+	local maxClassMembers = 0
+	for classID = 1, self:GetMaxClasses() do
+		roster[classID] = {}
+	end
+
+	for _, unit in ipairs((context and context.players) or {}) do
+		local classID = SafeNumber(unit.classID or self:GetClassID(unit.class), 0)
+		if classID > 0 then
+			local entry = DeepCopy(unit)
+			entry.classID = classID
+			entry.class = entry.class or CLASS_FILES_BY_ID[classID]
+			entry.unitid = entry.unitid or entry.unit
+			entry.visible = false
+			entry.hasbuff = false
+			entry.specialbuff = false
+			entry.dead = false
+			roster[classID][#roster[classID] + 1] = entry
+			if #roster[classID] > maxClassMembers then
+				maxClassMembers = #roster[classID]
+			end
+		end
+	end
+
+	return roster, maxClassMembers
+end
+
+function PPA:PrepareSimulationClassRoster(context)
+	if type(self.simulation) ~= "table" then
+		return
+	end
+	local roster, maxClassMembers = self:BuildSimulationClassRoster(context or self.simulation.context)
+	self.simulation.classRoster = roster
+	self.simulation.maxClassMembers = maxClassMembers
+end
+
+function PPA:GetSimulationClassUnit(classID, playerID)
+	if not self:IsSimulationActive() then
+		return nil
+	end
+	classID = tonumber(classID)
+	playerID = tonumber(playerID)
+	if not classID or not playerID then
+		return nil
+	end
+	if type(self.simulation.classRoster) ~= "table" then
+		self:PrepareSimulationClassRoster(self.simulation.context)
+	end
+	local classRoster = self.simulation.classRoster and self.simulation.classRoster[classID]
+	return classRoster and classRoster[playerID] or nil
 end
 
 function PPA:CloneSimulationContext(guess)
@@ -3268,8 +3325,180 @@ function PPA:SeedPallyPowerSimulation(context)
 	_G.PP_Leader = true
 end
 
+function PPA:RenderSimulationBlessingsGrid()
+	if not self:IsSimulationActive() or not _G.PallyPower then
+		return false
+	end
+
+	local frame = _G.PallyPowerBlessingsFrame
+	if frame and frame.IsVisible and not frame:IsVisible() then
+		return false
+	end
+
+	local pallyPower = _G.PallyPower
+	local maxClasses = self:GetMaxClasses()
+	local maxPerClass = SafeNumber(_G.PALLYPOWER_MAXPERCLASS, 15)
+	local maxClassMembers = 0
+	if type(self.simulation.classRoster) ~= "table" then
+		self:PrepareSimulationClassRoster(self.simulation.context)
+	end
+
+	for classID = 1, maxClasses do
+		local groupName = "PallyPowerBlessingsFrameClassGroup" .. tostring(classID)
+		local classIcon = _G[groupName .. "ClassButtonIcon"]
+		if classIcon and classIcon.SetTexture then
+			classIcon:SetTexture(pallyPower.ClassIcons and pallyPower.ClassIcons[classID] or nil)
+		end
+
+		local classRoster = (self.simulation.classRoster and self.simulation.classRoster[classID]) or {}
+		if #classRoster > maxClassMembers then
+			maxClassMembers = #classRoster
+		end
+		for playerID = 1, maxPerClass do
+			local buttonName = groupName .. "PlayerButton" .. tostring(playerID)
+			local button = _G[buttonName]
+			local unit = classRoster[playerID]
+			if button and unit then
+				local text = _G[buttonName .. "Text"]
+				if text and text.SetText then
+					local shortName = unit.name
+					if _G.Ambiguate then
+						shortName = _G.Ambiguate(unit.fullName or unit.name, "short")
+					end
+					text:SetText(shortName)
+				end
+				local icon = _G[buttonName .. "Icon"]
+				if icon and icon.SetTexture then
+					local normal, greater = 0, 0
+					if pallyPower.GetSpellID then
+						normal, greater = pallyPower:GetSpellID(classID, unit.name)
+					end
+					if normal and greater and normal ~= greater then
+						icon:SetTexture(pallyPower.NormalBlessingIcons and pallyPower.NormalBlessingIcons[normal] or nil)
+					else
+						icon:SetTexture("")
+					end
+				end
+				if button.Show then
+					button:Show()
+				end
+			elseif button and button.Hide then
+				button:Hide()
+			end
+		end
+	end
+
+	local numPallys = 0
+	if type(_G.SyncList) == "table" then
+		for _ in pairs(_G.SyncList) do
+			numPallys = numPallys + 1
+		end
+	end
+	if frame then
+		if frame.SetScale then
+			frame:SetScale(pallyPower.opt and pallyPower.opt.configscale or 1)
+		end
+		if frame.SetHeight then
+			frame:SetHeight(14 + 24 + 56 + (numPallys * 100) + 22 + 13 * maxClassMembers)
+		end
+	end
+
+	local firstPlayer = _G.PallyPowerBlessingsFramePlayer1
+	if firstPlayer and firstPlayer.SetPoint then
+		firstPlayer:SetPoint("TOPLEFT", 8, -80 - 13 * maxClassMembers)
+	end
+	for classID = 1, maxClasses do
+		local line = _G["PallyPowerBlessingsFrameClassGroup" .. tostring(classID) .. "Line"]
+		if line and line.SetHeight then
+			line:SetHeight(56 + 13 * maxClassMembers)
+		end
+	end
+	local auraLine = _G.PallyPowerBlessingsFrameAuraGroup1Line
+	if auraLine and auraLine.SetHeight then
+		auraLine:SetHeight(56 + 13 * maxClassMembers)
+	end
+	local freeAssign = _G.PallyPowerBlessingsFrameFreeAssign
+	if freeAssign and freeAssign.SetChecked then
+		freeAssign:SetChecked(pallyPower.opt and pallyPower.opt.freeassign or false)
+	end
+
+	return true
+end
+
+function PPA:GetSimulationPlayerButtonUnit(button)
+	if not button or not button.GetName then
+		return nil
+	end
+	local classID, playerID = string.match(button:GetName() or "", "PallyPowerBlessingsFrameClassGroup(%d+)PlayerButton(%d+)")
+	return self:GetSimulationClassUnit(classID, playerID), tonumber(classID), tonumber(playerID)
+end
+
+function PPA:HandleSimulationPlayerButtonClick(button, mouseButton)
+	local unit, classID = self:GetSimulationPlayerButtonUnit(button)
+	if not unit then
+		return false
+	end
+	if _G.InCombatLockdown and _G.InCombatLockdown() then
+		return true
+	end
+	if type(_G.PallyPowerGrid_NormalBlessingMenu) == "function" then
+		_G.PallyPowerGrid_NormalBlessingMenu(button, mouseButton, unit.name, classID)
+	end
+	return true
+end
+
+function PPA:HandleSimulationPlayerButtonMouseWheel(button, delta)
+	local unit, classID = self:GetSimulationPlayerButtonUnit(button)
+	if not unit then
+		return false
+	end
+	if _G.InCombatLockdown and _G.InCombatLockdown() then
+		return true
+	end
+	if _G.PallyPower and _G.PallyPower.PerformPlayerCycle then
+		_G.PallyPower:PerformPlayerCycle(delta, unit.name, classID)
+	end
+	return true
+end
+
+function PPA:InstallSimulationFrameHooks()
+	if not self.simulationGridUpdateHookInstalled and type(_G.PallyPowerBlessingsGrid_Update) == "function" then
+		local originalGridUpdate = _G.PallyPowerBlessingsGrid_Update
+		_G.PallyPowerBlessingsGrid_Update = function(...)
+			originalGridUpdate(...)
+			if PPA:IsSimulationActive() then
+				PPA:RenderSimulationBlessingsGrid()
+			end
+		end
+		self.simulationGridUpdateHookInstalled = true
+	end
+
+	if not self.simulationPlayerButtonClickHookInstalled and type(_G.PallyPowerPlayerButton_OnClick) == "function" then
+		local originalClick = _G.PallyPowerPlayerButton_OnClick
+		_G.PallyPowerPlayerButton_OnClick = function(button, mouseButton, ...)
+			if PPA:IsSimulationActive() and PPA:HandleSimulationPlayerButtonClick(button, mouseButton) then
+				return
+			end
+			return originalClick(button, mouseButton, ...)
+		end
+		self.simulationPlayerButtonClickHookInstalled = true
+	end
+
+	if not self.simulationPlayerButtonWheelHookInstalled and type(_G.PallyPowerPlayerButton_OnMouseWheel) == "function" then
+		local originalWheel = _G.PallyPowerPlayerButton_OnMouseWheel
+		_G.PallyPowerPlayerButton_OnMouseWheel = function(button, delta, ...)
+			if PPA:IsSimulationActive() and PPA:HandleSimulationPlayerButtonMouseWheel(button, delta) then
+				return
+			end
+			return originalWheel(button, delta, ...)
+		end
+		self.simulationPlayerButtonWheelHookInstalled = true
+	end
+end
+
 function PPA:InstallSimulationHooks()
 	local pallyPower = _G.PallyPower
+	self:InstallSimulationFrameHooks()
 	if not pallyPower or self.simulationHooksInstalledFor == pallyPower then
 		return
 	end
@@ -3282,9 +3511,76 @@ function PPA:InstallSimulationHooks()
 		end
 		pallyPower[methodName] = function(target, ...)
 			if PPA:IsSimulationActive() then
+				if methodName == "UpdateRoster" then
+					PPA:PrepareSimulationClassRoster()
+					PPA:RenderSimulationBlessingsGrid()
+				end
 				return
 			end
 			return original(target, ...)
+		end
+	end
+
+	local originalGetUnit = pallyPower.GetUnit
+	if type(originalGetUnit) == "function" then
+		pallyPower.GetUnit = function(target, classID, playerID)
+			if PPA:IsSimulationActive() then
+				local unit = PPA:GetSimulationClassUnit(classID, playerID)
+				if unit then
+					return unit
+				end
+			end
+			return originalGetUnit(target, classID, playerID)
+		end
+	end
+
+	local originalGetUnitIdByName = pallyPower.GetUnitIdByName
+	if type(originalGetUnitIdByName) == "function" then
+		pallyPower.GetUnitIdByName = function(target, name)
+			if PPA:IsSimulationActive() then
+				local unit = PPA:GetSimulationUnit(name)
+				if unit then
+					return unit.unit
+				end
+			end
+			return originalGetUnitIdByName(target, name)
+		end
+	end
+
+	local originalCanBuffBlessing = pallyPower.CanBuffBlessing
+	if type(originalCanBuffBlessing) == "function" then
+		pallyPower.CanBuffBlessing = function(target, spellID, greaterSpellID, unitID, config)
+			local unit = PPA:IsSimulationActive() and PPA:GetSimulationUnit(unitID)
+			if unit then
+				local normalSpell
+				local greaterSpell
+				spellID = SafeNumber(spellID, 0)
+				greaterSpellID = SafeNumber(greaterSpellID, 0)
+				if spellID > 0 then
+					normalSpell = target.Spells and target.Spells[spellID]
+				end
+				if not target.isWrath and spellID == 7 and unit.name == target.player then
+					normalSpell = nil
+				end
+				if greaterSpellID > 0 then
+					greaterSpell = target.GSpells and target.GSpells[greaterSpellID]
+				end
+				return normalSpell, greaterSpell
+			end
+			return originalCanBuffBlessing(target, spellID, greaterSpellID, unitID, config)
+		end
+	end
+
+	local originalCheckLeader = pallyPower.CheckLeader
+	if type(originalCheckLeader) == "function" then
+		pallyPower.CheckLeader = function(target, name)
+			if PPA:IsSimulationActive() then
+				local unit = PPA:GetSimulationUnit(name)
+				if unit and SafeNumber(unit.rank, 0) > 0 then
+					return true
+				end
+			end
+			return originalCheckLeader(target, name)
 		end
 	end
 
@@ -3362,6 +3658,9 @@ function PPA:OpenAssignmentFrame()
 	end
 	self:CreateSmartButton()
 	self:ReflowButtons()
+	if self:IsSimulationActive() then
+		self:RenderSimulationBlessingsGrid()
+	end
 	return true
 end
 
@@ -3533,6 +3832,9 @@ function PPA:ApplyPlan(plan, context)
 		if _G.PallyPower.UpdateLayout then
 			_G.PallyPower:UpdateLayout()
 		end
+		if simulation then
+			self:RenderSimulationBlessingsGrid()
+		end
 	end
 
 	if _G.C_Timer and _G.C_Timer.After then
@@ -3577,6 +3879,51 @@ function PPA:PrintDebugPlan(plan, context)
 	end
 end
 
+function PPA:IsInRaidGroup()
+	if _G.IsInRaid then
+		local ok, inRaid = pcall(_G.IsInRaid)
+		return ok and inRaid == true
+	end
+	return false
+end
+
+function PPA:IsLocalRaidLeaderOrAssistant()
+	if _G.UnitIsGroupLeader then
+		local ok, isLeader = pcall(_G.UnitIsGroupLeader, "player")
+		if ok and isLeader then
+			return true
+		end
+	end
+	if _G.UnitIsGroupAssistant then
+		local ok, isAssistant = pcall(_G.UnitIsGroupAssistant, "player")
+		if ok and isAssistant then
+			return true
+		end
+	end
+	if _G.PallyPower and _G.PallyPower.CheckLeader and _G.PallyPower.player then
+		local ok, isLeader = pcall(_G.PallyPower.CheckLeader, _G.PallyPower, _G.PallyPower.player)
+		if ok and isLeader then
+			return true
+		end
+	end
+	return false
+end
+
+function PPA:ShouldWarnSmartAssignRaidAuthority()
+	return not self:IsSimulationActive()
+		and self:IsInRaidGroup()
+		and not self:IsLocalRaidLeaderOrAssistant()
+end
+
+function PPA:WarnSmartAssignRaidAuthority()
+	if not self:ShouldWarnSmartAssignRaidAuthority() then
+		return false
+	end
+	Print("Smart-Assign warning: without raid leader or assistant, other clients may only accept changes to your own paladin row.")
+	Print("Ask for assist or lead before broadcasting a full raid plan.")
+	return true
+end
+
 function PPA:CanRunSmartAssign()
 	if _G.InCombatLockdown and _G.InCombatLockdown() then
 		Print("Smart-Assign cannot run in combat.")
@@ -3596,6 +3943,9 @@ function PPA:CanRunSmartAssign()
 	if _G.PallyPower.opt and _G.PallyPower.opt.freeassign then
 		return true
 	end
+	if self:IsInRaidGroup() then
+		return true
+	end
 	Print("Only a group leader, raid assistant, or free-assignment paladin can broadcast assignments.")
 	return false
 end
@@ -3605,6 +3955,7 @@ function PPA:ExecuteSmartAssign(options)
 	if not self:CanRunSmartAssign() then
 		return
 	end
+	self:WarnSmartAssignRaidAuthority()
 
 	local context = self:BuildRuntimeContext(options.guess == true)
 	local uncertain = self:GetUncertainPlayers(context)
@@ -4077,6 +4428,15 @@ PPA._test = {
 	PrepareSimulationUnitMaps = function(context)
 		return PPA:PrepareSimulationUnitMaps(context)
 	end,
+	GetSimulationClassUnit = function(classID, playerID)
+		return PPA:GetSimulationClassUnit(classID, playerID)
+	end,
+	RenderSimulationBlessingsGrid = function()
+		return PPA:RenderSimulationBlessingsGrid()
+	end,
+	InstallSimulationHooks = function()
+		return PPA:InstallSimulationHooks()
+	end,
 	WithSimulationUnitAPIs = function(callback)
 		return PPA:WithSimulationUnitAPIs(callback)
 	end,
@@ -4091,6 +4451,12 @@ PPA._test = {
 	end,
 	ApplyPlan = function(plan, context)
 		return PPA:ApplyPlan(plan, context)
+	end,
+	CanRunSmartAssign = function()
+		return PPA:CanRunSmartAssign()
+	end,
+	ShouldWarnSmartAssignRaidAuthority = function()
+		return PPA:ShouldWarnSmartAssignRaidAuthority()
 	end,
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)

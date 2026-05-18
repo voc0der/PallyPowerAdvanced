@@ -1402,6 +1402,341 @@ test("simulation PallyPower hooks do not replace live unit APIs", function()
 	_G.GetRaidRosterInfo = old.GetRaidRosterInfo
 end)
 
+test("simulation assignment grid renders individual class members", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPowerBlessingsFrame = _G.PallyPowerBlessingsFrame,
+		PallyPowerBlessingsFramePlayer1 = _G.PallyPowerBlessingsFramePlayer1,
+		PallyPowerBlessingsFrameAuraGroup1Line = _G.PallyPowerBlessingsFrameAuraGroup1Line,
+		PallyPowerBlessingsFrameFreeAssign = _G.PallyPowerBlessingsFrameFreeAssign,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		PALLYPOWER_MAXPERCLASS = _G.PALLYPOWER_MAXPERCLASS,
+		SyncList = _G.SyncList,
+		simulation = PPA.simulation,
+	}
+	local touched = {}
+
+	local function frame(name)
+		local f = {name = name, shown = nil}
+		function f:SetTexture(value) self.texture = value end
+		function f:SetText(value) self.text = value end
+		function f:SetScale(value) self.scale = value end
+		function f:SetHeight(value) self.height = value end
+		function f:SetPoint(...) self.point = {...} end
+		function f:SetChecked(value) self.checked = value end
+		function f:Show() self.shown = true end
+		function f:Hide() self.shown = false end
+		function f:IsVisible() return true end
+		touched[#touched + 1] = name
+		_G[name] = f
+		return f
+	end
+
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.PALLYPOWER_MAXPERCLASS = 15
+	_G.PallyPowerBlessingsFrame = frame("PallyPowerBlessingsFrame")
+	_G.PallyPowerBlessingsFramePlayer1 = frame("PallyPowerBlessingsFramePlayer1")
+	_G.PallyPowerBlessingsFrameAuraGroup1Line = frame("PallyPowerBlessingsFrameAuraGroup1Line")
+	_G.PallyPowerBlessingsFrameFreeAssign = frame("PallyPowerBlessingsFrameFreeAssign")
+	for classID = 1, 9 do
+		frame("PallyPowerBlessingsFrameClassGroup" .. classID .. "ClassButtonIcon")
+		frame("PallyPowerBlessingsFrameClassGroup" .. classID .. "Line")
+		for playerID = 1, 15 do
+			frame("PallyPowerBlessingsFrameClassGroup" .. classID .. "PlayerButton" .. playerID)
+			frame("PallyPowerBlessingsFrameClassGroup" .. classID .. "PlayerButton" .. playerID .. "Text")
+			frame("PallyPowerBlessingsFrameClassGroup" .. classID .. "PlayerButton" .. playerID .. "Icon")
+		end
+	end
+
+	_G.PallyPower_NormalAssignments = {PpaSimHoly = {[1] = {}}}
+	_G.PallyPower_Assignments = {PpaSimHoly = {[1] = T.BUFF_SALVATION}}
+	_G.SyncList = {"PpaSimHoly", "PpaSimProt1", "PpaSimRet1"}
+	_G.PallyPower = {
+		player = "PpaSimHoly",
+		opt = {configscale = 0.9, freeassign = true},
+		ClassIcons = {[1] = "warrior-icon"},
+		NormalBlessingIcons = {[T.BUFF_SANCTUARY] = "sanctuary-icon"},
+		GetSpellID = function(_, classID, playerName)
+			if classID == 1 and playerName then
+				return T.BUFF_SANCTUARY, T.BUFF_SALVATION
+			end
+			return 0, 0
+		end,
+	}
+
+	local context = T.BuildSimulationContext(42)
+	PPA.simulation = {
+		active = true,
+		context = context,
+	}
+	T.PrepareSimulationUnitMaps(context)
+
+	local firstWarrior = T.GetSimulationClassUnit(1, 1)
+	assertEquals(firstWarrior ~= nil, true, "simulation should expose warrior class roster")
+	assertEquals(T.RenderSimulationBlessingsGrid(), true, "simulation grid render should run")
+	assertEquals(_G.PallyPowerBlessingsFrameClassGroup1PlayerButton1.shown, true, "first warrior button should be shown")
+	assertEquals(_G.PallyPowerBlessingsFrameClassGroup1PlayerButton1Text.text, firstWarrior.name, "first warrior button text")
+	assertEquals(_G.PallyPowerBlessingsFrameClassGroup1PlayerButton1Icon.texture, "sanctuary-icon", "normal override icon should render")
+	assertEquals(_G.PallyPowerBlessingsFrameClassGroup1ClassButtonIcon.texture, "warrior-icon", "class icon should render")
+	assertEquals(_G.PallyPowerBlessingsFrame.height > 14 + 24 + 56 + (3 * 100) + 22, true, "frame should grow for simulated members")
+	assertEquals(_G.PallyPowerBlessingsFrameFreeAssign.checked, true, "free assign checkbox should track simulation option")
+
+	for _, name in ipairs(touched) do
+		_G[name] = old[name]
+	end
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.PALLYPOWER_MAXPERCLASS = old.PALLYPOWER_MAXPERCLASS
+	_G.SyncList = old.SyncList
+	PPA.simulation = old.simulation
+end)
+
+test("simulation assignment member buttons use simulated roster for overrides", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPowerGrid_NormalBlessingMenu = _G.PallyPowerGrid_NormalBlessingMenu,
+		PallyPowerPlayerButton_OnClick = _G.PallyPowerPlayerButton_OnClick,
+		PallyPowerPlayerButton_OnMouseWheel = _G.PallyPowerPlayerButton_OnMouseWheel,
+		simulation = PPA.simulation,
+		simulationHooksInstalledFor = PPA.simulationHooksInstalledFor,
+		simulationPlayerButtonClickHookInstalled = PPA.simulationPlayerButtonClickHookInstalled,
+		simulationPlayerButtonWheelHookInstalled = PPA.simulationPlayerButtonWheelHookInstalled,
+	}
+	local clicked
+	local cycled
+
+	_G.PallyPower = {
+		UpdateRoster = function() end,
+		PerformPlayerCycle = function(_, delta, name, classID)
+			cycled = {delta = delta, name = name, classID = classID}
+		end,
+	}
+	_G.PallyPowerGrid_NormalBlessingMenu = function(button, mouseButton, name, classID)
+		clicked = {button = button, mouseButton = mouseButton, name = name, classID = classID}
+	end
+	_G.PallyPowerPlayerButton_OnClick = function()
+		error("live PallyPower class table should not be used")
+	end
+	_G.PallyPowerPlayerButton_OnMouseWheel = function()
+		error("live PallyPower class table should not be used")
+	end
+
+	local context = T.BuildSimulationContext(42)
+	PPA.simulation = {
+		active = true,
+		context = context,
+	}
+	T.PrepareSimulationUnitMaps(context)
+	PPA.simulationHooksInstalledFor = nil
+	PPA.simulationPlayerButtonClickHookInstalled = nil
+	PPA.simulationPlayerButtonWheelHookInstalled = nil
+	T.InstallSimulationHooks()
+
+	local button = {
+		GetName = function()
+			return "PallyPowerBlessingsFrameClassGroup1PlayerButton1"
+		end,
+	}
+	local firstWarrior = T.GetSimulationClassUnit(1, 1)
+	_G.PallyPowerPlayerButton_OnClick(button, "LeftButton")
+	_G.PallyPowerPlayerButton_OnMouseWheel(button, -1)
+
+	assertEquals(clicked.name, firstWarrior.name, "click should target simulated warrior")
+	assertEquals(clicked.classID, 1, "click should preserve class ID")
+	assertEquals(cycled.name, firstWarrior.name, "mouse wheel should target simulated warrior")
+	assertEquals(cycled.classID, 1, "mouse wheel should preserve class ID")
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPowerGrid_NormalBlessingMenu = old.PallyPowerGrid_NormalBlessingMenu
+	_G.PallyPowerPlayerButton_OnClick = old.PallyPowerPlayerButton_OnClick
+	_G.PallyPowerPlayerButton_OnMouseWheel = old.PallyPowerPlayerButton_OnMouseWheel
+	PPA.simulation = old.simulation
+	PPA.simulationHooksInstalledFor = old.simulationHooksInstalledFor
+	PPA.simulationPlayerButtonClickHookInstalled = old.simulationPlayerButtonClickHookInstalled
+	PPA.simulationPlayerButtonWheelHookInstalled = old.simulationPlayerButtonWheelHookInstalled
+end)
+
+test("simulation PallyPower lookup hooks serve normal blessing menus without live unit APIs", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		simulation = PPA.simulation,
+		simulationHooksInstalledFor = PPA.simulationHooksInstalledFor,
+	}
+
+	_G.PallyPower = {
+		player = "PpaSimHoly",
+		isWrath = false,
+		Spells = {[T.BUFF_WISDOM] = "Blessing of Wisdom"},
+		GSpells = {[T.BUFF_WISDOM] = "Greater Blessing of Wisdom"},
+		GetUnitIdByName = function()
+			error("live roster lookup should not be used")
+		end,
+		CanBuffBlessing = function()
+			error("live unit spell lookup should not be used")
+		end,
+	}
+
+	local context = T.BuildSimulationContext(42)
+	PPA.simulation = {
+		active = true,
+		context = context,
+	}
+	T.PrepareSimulationUnitMaps(context)
+	PPA.simulationHooksInstalledFor = nil
+	T.InstallSimulationHooks()
+
+	local firstWarrior = T.GetSimulationClassUnit(1, 1)
+	assertEquals(_G.PallyPower:GetUnitIdByName(firstWarrior.name), firstWarrior.unit, "simulated unit ID lookup")
+	local normal, greater = _G.PallyPower:CanBuffBlessing(T.BUFF_WISDOM, T.BUFF_WISDOM, firstWarrior.unit, true)
+	assertEquals(normal, "Blessing of Wisdom", "normal blessing name should come from PallyPower table")
+	assertEquals(greater, "Greater Blessing of Wisdom", "greater blessing name should come from PallyPower table")
+
+	_G.PallyPower = old.PallyPower
+	PPA.simulation = old.simulation
+	PPA.simulationHooksInstalledFor = old.simulationHooksInstalledFor
+end)
+
+test("smart assign warns non-assist raid users that only their own row can stick", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PP_Leader = _G.PP_Leader,
+		IsInRaid = _G.IsInRaid,
+		UnitIsGroupLeader = _G.UnitIsGroupLeader,
+		UnitIsGroupAssistant = _G.UnitIsGroupAssistant,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+		BuildRuntimeContext = PPA.BuildRuntimeContext,
+		GetUncertainPlayers = PPA.GetUncertainPlayers,
+		BuildSmartPlan = PPA.BuildSmartPlan,
+		ApplyPlan = PPA.ApplyPlan,
+		PrintManualAssignments = PPA.PrintManualAssignments,
+		PrintDebugPlan = PPA.PrintDebugPlan,
+		simulation = PPA.simulation,
+	}
+	local messages = {}
+	local applied = false
+
+	_G.PallyPower = {
+		player = "Holyone",
+		isWrath = false,
+		opt = {freeassign = false},
+		CheckLeader = function()
+			return false
+		end,
+	}
+	_G.PP_Leader = true
+	_G.IsInRaid = function()
+		return true
+	end
+	_G.UnitIsGroupLeader = function()
+		return false
+	end
+	_G.UnitIsGroupAssistant = function()
+		return false
+	end
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+	PPA.simulation = nil
+	PPA.BuildRuntimeContext = function()
+		return {
+			playerName = "Holyone",
+			players = {},
+			paladins = {
+				{name = "Holyone", hasAddon = true},
+			},
+		}
+	end
+	PPA.GetUncertainPlayers = function()
+		return {}
+	end
+	PPA.BuildSmartPlan = function()
+		return {
+			assignments = {},
+			normalAssignments = {},
+			auraAssignments = {},
+			warnings = {},
+		}
+	end
+	PPA.ApplyPlan = function()
+		applied = true
+		return true
+	end
+	PPA.PrintManualAssignments = function()
+	end
+	PPA.PrintDebugPlan = function()
+	end
+
+	assertEquals(T.CanRunSmartAssign(), true, "raid non-assist should still be able to run local smart assign")
+	assertEquals(T.ShouldWarnSmartAssignRaidAuthority(), true, "raid non-assist should trigger authority warning")
+	PPA:ExecuteSmartAssign({noPrompt = true})
+	assertEquals(applied, true, "smart assign should still apply locally")
+	assertEquals(
+		messages[1],
+		"|cff33ff99PPA|r: Smart-Assign warning: without raid leader or assistant, other clients may only accept changes to your own paladin row.",
+		"raid authority warning"
+	)
+
+	_G.PallyPower = old.PallyPower
+	_G.PP_Leader = old.PP_Leader
+	_G.IsInRaid = old.IsInRaid
+	_G.UnitIsGroupLeader = old.UnitIsGroupLeader
+	_G.UnitIsGroupAssistant = old.UnitIsGroupAssistant
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+	PPA.BuildRuntimeContext = old.BuildRuntimeContext
+	PPA.GetUncertainPlayers = old.GetUncertainPlayers
+	PPA.BuildSmartPlan = old.BuildSmartPlan
+	PPA.ApplyPlan = old.ApplyPlan
+	PPA.PrintManualAssignments = old.PrintManualAssignments
+	PPA.PrintDebugPlan = old.PrintDebugPlan
+	PPA.simulation = old.simulation
+end)
+
+test("smart assign does not warn raid assistants about own-row limits", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PP_Leader = _G.PP_Leader,
+		IsInRaid = _G.IsInRaid,
+		UnitIsGroupLeader = _G.UnitIsGroupLeader,
+		UnitIsGroupAssistant = _G.UnitIsGroupAssistant,
+		simulation = PPA.simulation,
+	}
+
+	_G.PallyPower = {
+		player = "Holyone",
+		isWrath = false,
+		opt = {freeassign = false},
+		CheckLeader = function()
+			return false
+		end,
+	}
+	_G.PP_Leader = true
+	_G.IsInRaid = function()
+		return true
+	end
+	_G.UnitIsGroupLeader = function()
+		return false
+	end
+	_G.UnitIsGroupAssistant = function()
+		return true
+	end
+	PPA.simulation = nil
+
+	assertEquals(T.ShouldWarnSmartAssignRaidAuthority(), false, "raid assistant should not trigger authority warning")
+
+	_G.PallyPower = old.PallyPower
+	_G.PP_Leader = old.PP_Leader
+	_G.IsInRaid = old.IsInRaid
+	_G.UnitIsGroupLeader = old.UnitIsGroupLeader
+	_G.UnitIsGroupAssistant = old.UnitIsGroupAssistant
+	PPA.simulation = old.simulation
+end)
+
 test("PallyPower auto assign starts conflict watch", function()
 	local old = {
 		PallyPower = _G.PallyPower,

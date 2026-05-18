@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.1.23] - 2026-05-18
+
+### Fixed
+- Restore simulated assignment-frame class member rows so `/ppa simulate` once again supports per-player normal blessing overrides.
+
+### Changed
+- Warn raid users who run Smart-Assign without leader or assistant that other clients may only accept changes to their own paladin row.
+
+### Tests
+- Add coverage for simulated member-row rendering, simulated click and mouse-wheel override routing, and normal-blessing menu lookup hooks.
+- Add coverage for Smart-Assign's non-assist raid authority warning.
+
 ## [0.1.22] - 2026-05-17
 
 ### Fixed
