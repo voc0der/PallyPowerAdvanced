@@ -263,6 +263,30 @@ test("elemental shaman damage prefers wisdom where enhancement prefers might", f
 	assertEquals(T.GetPriorityForUnit(enhancement, context)[3], T.BUFF_MIGHT, "enhancement third priority")
 end)
 
+test("hunters prefer wisdom over light for damage", function()
+	local hunter = {name = "Shots", class = "HUNTER", classID = 6, role = "DAMAGER"}
+	local priority = T.GetPriorityForUnit(hunter, {healingPaladinPresent = true, pallyCount = 4})
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 4,
+		healingPaladinPresent = true,
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 2), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Tankadin", role = "TANK", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Retone", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Rettwo", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+		},
+		players = {hunter},
+	}
+
+	assertEquals(priority[4], T.BUFF_WISDOM, "hunter fourth priority should be wisdom")
+	assertEquals(priority[5], T.BUFF_LIGHT, "hunter light should come after wisdom")
+
+	local buffs = collectClassBuffs(T.BuildSmartPlan(context), 6)
+	assertEquals(buffs[T.BUFF_WISDOM], true, "hunters should receive wisdom when slots allow")
+	assertEquals(buffs[T.BUFF_LIGHT], nil, "hunters should not receive light before wisdom")
+end)
+
 test("physical and caster classes keep useful late blessings without useless fillers", function()
 	local context = {
 		playerName = "Holyone",

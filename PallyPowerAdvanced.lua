@@ -612,7 +612,7 @@ function PPA:GetBasePriorityForUnit(unit, context)
 		end
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "HUNTER" then
-		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
+		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_WISDOM, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "MAGE" or class == "WARLOCK" then
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_WISDOM, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "SHAMAN" then

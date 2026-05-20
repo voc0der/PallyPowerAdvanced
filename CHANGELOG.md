@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.30] - 2026-05-20
+
+### Fixed
+- Hunters now prefer Blessing of Wisdom before Blessing of Light for damage assignments.
+
+### Tests
+- Add coverage that hunter assignments include Wisdom instead of Light when enough paladin slots are available.
+
 ## [0.1.29] - 2026-05-20
 
 ### Changed
