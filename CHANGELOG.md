@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [0.1.28] - 2026-05-20
+
+### Changed
+- Aura Smart-Assign now plans by subgroup, requiring Devotion coverage for tank groups and preferring Concentration before Devotion and Retribution for non-tank groups.
+- Improved Sanctity Aura is now read from PPA talent broadcasts and assigned as the top aura priority, except when the improved-Sanctity paladin is the tank and the only paladin in that tank group.
+- Simulated paladins now include Kings and no-Kings build variants across Holy, Protection, and Retribution roles.
+
+### Fixed
+- Kings assignment now respects PallyPower/PPA talent data instead of assuming capability from paladin spec.
+- Improved Blessing of Wisdom and improved Blessing of Sanctuary owners are preferred for those blessing assignments when coverage allows.
+
+### Tests
+- Add coverage for subgroup aura ordering, Improved Sanctity Aura assignment, solo tank Devotion fallback, Kings/no-Kings simulation, and improved blessing ownership.
+
 ## [0.1.27] - 2026-05-18
 
 ### Changed

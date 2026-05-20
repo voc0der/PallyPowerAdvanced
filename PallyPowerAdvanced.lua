@@ -16,6 +16,7 @@ local BUFF_SANCTUARY = 6
 local AURA_DEVOTION = 1
 local AURA_RETRIBUTION = 2
 local AURA_CONCENTRATION = 3
+local AURA_SANCTITY = 7
 
 local BUFF_WARNING_SECONDS = 60
 local BUFF_WARNING_SCAN_INTERVAL = 10
@@ -28,7 +29,7 @@ local ASSIGNMENT_CONFLICT_WINDOW_SECONDS = 5
 local ASSIGNMENT_CONFLICT_BURST_SECONDS = 1
 
 local PPA_SPEC_PREFIX = "PPA"
-local PPA_SPEC_VERSION = 1
+local PPA_SPEC_VERSION = 2
 
 local SIMULATION_ROSTER_SIZE = 25
 local SIMULATION_LOCAL_PALADIN = "PpaSimHoly"
@@ -108,6 +109,7 @@ local AURA_NAMES = {
 	[AURA_DEVOTION] = "Devotion Aura",
 	[AURA_RETRIBUTION] = "Retribution Aura",
 	[AURA_CONCENTRATION] = "Concentration Aura",
+	[AURA_SANCTITY] = "Sanctity Aura",
 }
 
 local ROLE_LABELS = {
@@ -129,11 +131,17 @@ local DEFAULT_CLASS_ORDER = {
 	CLASS_ID.SHAMAN,
 }
 
-local AURA_PRIORITY = {
+local TRACKED_AURAS = {
 	AURA_DEVOTION,
 	AURA_RETRIBUTION,
 	AURA_CONCENTRATION,
+	AURA_SANCTITY,
 }
+
+local TRACKED_AURA_SET = {}
+for _, aura in ipairs(TRACKED_AURAS) do
+	TRACKED_AURA_SET[aura] = true
+end
 
 local GENERAL_TIE_ORDER = {
 	[BUFF_KINGS] = 1,
@@ -656,6 +664,21 @@ local function SkillTalent(skill)
 	return 0
 end
 
+function PPA:GetPallyPowerBuffCapability(paladinName, buff)
+	local pallyPower = _G.PallyPower
+	if type(pallyPower) ~= "table" or type(pallyPower.CanBuff) ~= "function" then
+		return nil
+	end
+	if type(_G.AllPallys) ~= "table" or type(_G.AllPallys[paladinName]) ~= "table" then
+		return nil
+	end
+	local ok, canBuff = pcall(pallyPower.CanBuff, pallyPower, paladinName, buff)
+	if ok then
+		return canBuff == true
+	end
+	return nil
+end
+
 function PPA:InferPaladinRoleFromSkills(skills)
 	if type(skills) ~= "table" then
 		return nil
@@ -677,6 +700,16 @@ function PPA:CanPaladinBuff(paladin, buff)
 
 	if paladin.hasAddon then
 		local skill = SkillForBuff(paladin, buff)
+		local pallyPowerCanBuff = self:GetPallyPowerBuffCapability(paladin.name, buff)
+		if pallyPowerCanBuff ~= nil then
+			if not pallyPowerCanBuff then
+				return false
+			end
+			if buff == BUFF_SANCTUARY then
+				return SkillRank(skill) > 0 and SkillTalent(skill) > 0
+			end
+			return SkillRank(skill) > 0
+		end
 		if buff == BUFF_SANCTUARY then
 			return SkillRank(skill) > 0 and SkillTalent(skill) > 0
 		end
@@ -685,7 +718,7 @@ function PPA:CanPaladinBuff(paladin, buff)
 
 	local role = NormalizeRole(paladin.role)
 	if buff == BUFF_KINGS then
-		return role == ROLE_TANK or role == ROLE_HEALER
+		return true
 	elseif buff == BUFF_SANCTUARY then
 		return role == ROLE_TANK
 	elseif buff == BUFF_WISDOM or buff == BUFF_MIGHT or buff == BUFF_SALVATION or buff == BUFF_LIGHT then
@@ -726,6 +759,7 @@ function PPA:ScorePaladinForBuff(paladin, buff)
 
 	if buff == BUFF_WISDOM then
 		score = score + (role == ROLE_HEALER and 18 or 0)
+		score = score + (PaladinHasImprovedWisdom(paladin) and 12 or 0)
 	elseif buff == BUFF_LIGHT then
 		score = score + (role == ROLE_HEALER and 16 or 0)
 	elseif buff == BUFF_SANCTUARY then
@@ -1520,9 +1554,27 @@ local function AuraSkillForPaladin(paladin, aura)
 	return paladin.auras[aura]
 end
 
-function PPA:CanPaladinUseAura(paladin, aura)
-	if not paladin or not aura or aura < AURA_DEVOTION or aura > AURA_CONCENTRATION then
+local function IsTrackedAura(aura)
+	return TRACKED_AURA_SET[aura] == true
+end
+
+function PPA:PaladinHasImprovedSanctityAura(paladin)
+	if not paladin then
 		return false
+	end
+	local specData = paladin.specData or self:GetUnitSpecData(paladin.name)
+	if type(specData) == "table" and specData.impSanctityAura ~= nil then
+		return SafeNumber(specData.impSanctityAura, 0) > 0
+	end
+	return SkillTalent(AuraSkillForPaladin(paladin, AURA_SANCTITY)) > 0
+end
+
+function PPA:CanPaladinUseAura(paladin, aura)
+	if not paladin or not IsTrackedAura(aura) then
+		return false
+	end
+	if aura == AURA_SANCTITY then
+		return SkillRank(AuraSkillForPaladin(paladin, aura)) > 0 and self:PaladinHasImprovedSanctityAura(paladin)
 	end
 	if paladin.hasAddon then
 		return SkillRank(AuraSkillForPaladin(paladin, aura)) > 0
@@ -1535,10 +1587,7 @@ function PPA:ScorePaladinForAura(paladin, aura)
 		local skill = AuraSkillForPaladin(paladin, aura)
 		local rank = SkillRank(skill)
 		local talent = SkillTalent(skill)
-		if aura == AURA_DEVOTION then
-			return talent * 100 + rank * 10
-		end
-		return rank * 10 + talent
+		return talent * 100 + rank * 10
 	end
 
 	local role = NormalizeRole(paladin.role)
@@ -1548,6 +1597,8 @@ function PPA:ScorePaladinForAura(paladin, aura)
 		return 8 + (role == ROLE_DAMAGER and 4 or 0)
 	elseif aura == AURA_CONCENTRATION then
 		return 6 + (role == ROLE_HEALER and 4 or 0)
+	elseif aura == AURA_SANCTITY then
+		return self:PaladinHasImprovedSanctityAura(paladin) and 20 or 0
 	end
 	return 0
 end
@@ -1567,23 +1618,76 @@ function PPA:SelectPaladinForAura(paladins, aura, usedPaladins)
 	return bestPaladin, bestScore
 end
 
+local TANK_AURA_PRIORITY = {
+	AURA_DEVOTION,
+	AURA_RETRIBUTION,
+	AURA_CONCENTRATION,
+}
+
+local NON_TANK_AURA_PRIORITY = {
+	AURA_CONCENTRATION,
+	AURA_DEVOTION,
+	AURA_RETRIBUTION,
+}
+
+local function UnitIsTank(unit)
+	if not unit then
+		return false
+	end
+	return NormalizeRole(unit.role) == ROLE_TANK or unit.mainTank == true or NormalizeRole(unit.raidRole) == ROLE_TANK
+end
+
+local function GetUnitSubgroup(unit)
+	return SafeNumber(unit and unit.subgroup, 1)
+end
+
+function PPA:GetAuraPriorityForSubgroup(group)
+	local priority = {}
+	if group then
+		local sanctityPaladin = self:SelectPaladinForAura(group.paladins, AURA_SANCTITY, {})
+		local soloTankPaladin = group.hasTank and #(group.paladins or {}) == 1 and UnitIsTank(sanctityPaladin)
+		if sanctityPaladin and not soloTankPaladin then
+			priority[#priority + 1] = AURA_SANCTITY
+		end
+	end
+
+	local fallback = group and group.hasTank and TANK_AURA_PRIORITY or NON_TANK_AURA_PRIORITY
+	for _, aura in ipairs(fallback) do
+		priority[#priority + 1] = aura
+	end
+	return priority
+end
+
 function PPA:BuildAuraAssignments(context, plan)
 	local subgroups = {}
-	for _, paladin in ipairs(context.paladins or {}) do
-		local subgroup = paladin.subgroup or 1
+	for _, unit in ipairs(context.players or {}) do
+		local subgroup = GetUnitSubgroup(unit)
 		if not subgroups[subgroup] then
-			subgroups[subgroup] = {}
+			subgroups[subgroup] = {paladins = {}, hasTank = false}
 		end
-		subgroups[subgroup][#subgroups[subgroup] + 1] = paladin
+		if UnitIsTank(unit) then
+			subgroups[subgroup].hasTank = true
+		end
+	end
+
+	for _, paladin in ipairs(context.paladins or {}) do
+		local subgroup = GetUnitSubgroup(paladin)
+		if not subgroups[subgroup] then
+			subgroups[subgroup] = {paladins = {}, hasTank = false}
+		end
+		subgroups[subgroup].paladins[#subgroups[subgroup].paladins + 1] = paladin
+		if UnitIsTank(paladin) then
+			subgroups[subgroup].hasTank = true
+		end
 		if paladin.hasAddon then
 			plan.auraAssignments[paladin.name] = 0
 		end
 	end
 
-	for subgroup, paladins in pairs(subgroups) do
+	for subgroup, group in pairs(subgroups) do
 		local usedPaladins = {}
-		for _, aura in ipairs(AURA_PRIORITY) do
-			local paladin = self:SelectPaladinForAura(paladins, aura, usedPaladins)
+		for _, aura in ipairs(self:GetAuraPriorityForSubgroup(group)) do
+			local paladin = self:SelectPaladinForAura(group.paladins, aura, usedPaladins)
 			if paladin then
 				usedPaladins[paladin.name] = true
 				if paladin.hasAddon then
@@ -2439,7 +2543,13 @@ function PPA:BuildPaladinSkills(name)
 		}
 		for buff, talentRank in pairs(overrides) do
 			if skills[buff] then
-				skills[buff].talent = talentRank
+				if buff == BUFF_KINGS and SafeNumber(talentRank, 0) <= 0 then
+					skills[buff] = nil
+				else
+					skills[buff].talent = talentRank
+				end
+			elseif buff == BUFF_KINGS and SafeNumber(talentRank, 0) > 0 then
+				skills[buff] = {rank = 1, talent = talentRank}
 			end
 		end
 	end
@@ -2455,16 +2565,30 @@ function PPA:BuildPaladinAuras(name)
 	local allPallys = _G.AllPallys
 	local info = allPallys and allPallys[name]
 	local auraInfo = type(info) == "table" and info.AuraInfo
-	if type(auraInfo) ~= "table" then
-		return auras
+
+	if type(auraInfo) == "table" then
+		for _, aura in ipairs(TRACKED_AURAS) do
+			if type(auraInfo[aura]) == "table" then
+				auras[aura] = {
+					rank = SafeNumber(auraInfo[aura].rank, 0),
+					talent = SafeNumber(auraInfo[aura].talent, 0),
+				}
+			end
+		end
 	end
 
-	for aura = AURA_DEVOTION, AURA_CONCENTRATION do
-		if type(auraInfo[aura]) == "table" then
-			auras[aura] = {
-				rank = SafeNumber(auraInfo[aura].rank, 0),
-				talent = SafeNumber(auraInfo[aura].talent, 0),
-			}
+	local specData = self:GetUnitSpecData(name)
+	if type(specData) == "table" then
+		local hasSanctity = SafeNumber(specData.sanctityAura, 0) > 0
+		if specData.impSanctityAura ~= nil then
+			local improvedSanctity = SafeNumber(specData.impSanctityAura, 0)
+			if auras[AURA_SANCTITY] then
+				auras[AURA_SANCTITY].talent = improvedSanctity
+			elseif hasSanctity or improvedSanctity > 0 then
+				auras[AURA_SANCTITY] = {rank = 1, talent = improvedSanctity}
+			end
+		elseif hasSanctity and not auras[AURA_SANCTITY] then
+			auras[AURA_SANCTITY] = {rank = 1, talent = 0}
 		end
 	end
 	return auras
@@ -2477,6 +2601,7 @@ local SPEC_TALENT_NAMES = {
 	["Blessing of Sanctuary"]          = "impSanc",
 	["Blessing of Kings"]              = "kings",
 	["Sanctity Aura"]                  = "sanctityAura",
+	["Improved Sanctity Aura"]         = "impSanctityAura",
 	["Holy Shield"]                    = "holyShield",
 }
 
@@ -2493,7 +2618,7 @@ function PPA:ReadLocalTalents()
 	local activeGroup = GetActiveTalentGroup() or 1
 	local numTabs = (GetNumTalentTabs and GetNumTalentTabs()) or 3
 
-	local result = {activeTab = 1, impMight = 0, impWisdom = 0, impSanc = 0, kings = 0, sanctityAura = 0, holyShield = 0}
+	local result = {activeTab = 1, impMight = 0, impWisdom = 0, impSanc = 0, kings = 0, sanctityAura = 0, impSanctityAura = 0, holyShield = 0}
 
 	local bestPoints = -1
 	for tab = 1, numTabs do
@@ -2527,8 +2652,8 @@ function PPA:BroadcastSpec()
 	if not t then
 		return
 	end
-	local msg = string.format("SPEC:%d|M:%d|W:%d|S:%d|K:%d|SA:%d|HS:%d|v:%d",
-		t.activeTab, t.impMight, t.impWisdom, t.impSanc, t.kings, t.sanctityAura, t.holyShield, PPA_SPEC_VERSION)
+	local msg = string.format("SPEC:%d|M:%d|W:%d|S:%d|K:%d|SA:%d|ISA:%d|HS:%d|v:%d",
+		t.activeTab, t.impMight, t.impWisdom, t.impSanc, t.kings, t.sanctityAura, t.impSanctityAura, t.holyShield, PPA_SPEC_VERSION)
 	local IsInRaid  = _G.IsInRaid
 	local IsInGroup = _G.IsInGroup
 	local channel
@@ -2565,8 +2690,9 @@ function PPA:HandleAddonMessage(prefix, text, _, sender)
 		impWisdom    = tonumber(text:match("|W:(%d+)")) or 0,
 		impSanc      = tonumber(text:match("|S:(%d+)")) or 0,
 		kings        = tonumber(text:match("|K:(%d+)")) or 0,
-		sanctityAura = tonumber(text:match("|SA:(%d+)")) or 0,
-		holyShield   = tonumber(text:match("|HS:(%d+)")) or 0,
+		sanctityAura    = tonumber(text:match("|SA:(%d+)")) or 0,
+		impSanctityAura = tonumber(text:match("|ISA:(%d+)")),
+		holyShield      = tonumber(text:match("|HS:(%d+)")) or 0,
 	}
 end
 
@@ -2742,15 +2868,20 @@ local function SimulationRaidRole(role)
 	return NormalizeRole(role)
 end
 
-function PPA:BuildSimulationPaladinSkills(role)
+function PPA:BuildSimulationPaladinSkills(role, hasKings)
 	role = NormalizeRole(role)
 	local skills = {
 		[BUFF_WISDOM] = {rank = 7, talent = role == ROLE_HEALER and 2 or 0},
 		[BUFF_MIGHT] = {rank = 7, talent = role == ROLE_DAMAGER and 2 or 0},
-		[BUFF_KINGS] = {rank = 1, talent = 0},
 		[BUFF_SALVATION] = {rank = 1, talent = 0},
 		[BUFF_LIGHT] = {rank = 4, talent = 0},
 	}
+	if hasKings == nil then
+		hasKings = true
+	end
+	if hasKings then
+		skills[BUFF_KINGS] = {rank = 1, talent = 0}
+	end
 	if role == ROLE_TANK then
 		skills[BUFF_SANCTUARY] = {rank = 5, talent = 2}
 	end
@@ -2763,6 +2894,7 @@ function PPA:BuildSimulationPaladinAuras(role)
 		[AURA_DEVOTION] = {rank = 7, talent = role == ROLE_TANK and 2 or 0},
 		[AURA_RETRIBUTION] = {rank = 5, talent = role == ROLE_DAMAGER and 1 or 0},
 		[AURA_CONCENTRATION] = {rank = 1, talent = role == ROLE_HEALER and 1 or 0},
+		[AURA_SANCTITY] = {rank = role == ROLE_DAMAGER and 1 or 0, talent = role == ROLE_DAMAGER and 2 or 0},
 	}
 end
 
@@ -2786,6 +2918,7 @@ function PPA:BuildSimulationContext(seed)
 		[ROLE_DAMAGER] = 0,
 	}
 	local nameCounts = {}
+	local paladinRoleBuildCounts = {}
 
 	local function nextName(classFile, role, spec)
 		local base = SimulationNameBase(classFile, role, spec)
@@ -2815,6 +2948,11 @@ function PPA:BuildSimulationContext(seed)
 			spec = spec,
 			simulation = true,
 		}
+		if classFile == "PALADIN" then
+			local roleKey = unit.role or ROLE_NONE
+			paladinRoleBuildCounts[roleKey] = (paladinRoleBuildCounts[roleKey] or 0) + 1
+			unit.hasKings = paladinRoleBuildCounts[roleKey] ~= 2
+		end
 		players[#players + 1] = unit
 		classCounts[classFile] = (classCounts[classFile] or 0) + 1
 		roleCounts[unit.role] = (roleCounts[unit.role] or 0) + 1
@@ -2908,7 +3046,7 @@ function PPA:BuildSimulationContext(seed)
 		if unit.class == "PALADIN" then
 			local paladin = DeepCopy(unit)
 			paladin.hasAddon = true
-			paladin.skills = self:BuildSimulationPaladinSkills(unit.role)
+			paladin.skills = self:BuildSimulationPaladinSkills(unit.role, unit.hasKings)
 			paladin.auras = self:BuildSimulationPaladinAuras(unit.role)
 			paladins[#paladins + 1] = paladin
 			if NormalizeRole(paladin.role) == ROLE_HEALER then
@@ -3272,6 +3410,7 @@ function PPA:BuildRuntimeContext(guess)
 	for _, unit in ipairs(players) do
 		if unit.class == "PALADIN" then
 			local hasAddon = type(_G.AllPallys) == "table" and type(_G.AllPallys[unit.name]) == "table"
+			local specData = self:GetUnitSpecData(unit.name)
 			local skills = hasAddon and self:BuildPaladinSkills(unit.name) or {}
 			local role = unit.role
 			if NormalizeRole(role) == ROLE_NONE then
@@ -3290,6 +3429,7 @@ function PPA:BuildRuntimeContext(guess)
 				hasAddon = hasAddon,
 				skills = skills,
 				auras = hasAddon and self:BuildPaladinAuras(unit.name) or {},
+				specData = specData,
 			}
 		end
 	end
@@ -4750,6 +4890,7 @@ PPA._test = {
 	AURA_DEVOTION = AURA_DEVOTION,
 	AURA_RETRIBUTION = AURA_RETRIBUTION,
 	AURA_CONCENTRATION = AURA_CONCENTRATION,
+	AURA_SANCTITY = AURA_SANCTITY,
 	BuildSmartPlan = function(context)
 		return PPA:BuildSmartPlan(context)
 	end,

@@ -322,6 +322,44 @@ test("improved might ret paladin is preferred for might", function()
 	assertEquals(plan.assignments.Retadin[2], T.BUFF_MIGHT, "ret paladin with improved might should cover rogue might")
 end)
 
+test("improved wisdom paladin is preferred for wisdom over healer role", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 2,
+		healingPaladinPresent = true,
+		improvedWisdomPaladinPresent = true,
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 0), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Wisret", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 2), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+		},
+		players = {
+			{name = "Prayer", class = "PRIEST", classID = 3, role = "HEALER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Wisret[3], T.BUFF_WISDOM, "paladin with improved wisdom should cover priest wisdom")
+	assertEquals(plan.assignments.Holyone[3], T.BUFF_KINGS, "unimproved healer should cover the remaining priest blessing")
+end)
+
+test("higher sanctuary talent paladin is preferred for sanctuary", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 2,
+		healingPaladinPresent = false,
+		paladins = {
+			{name = "Sancone", role = "TANK", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SANCTUARY] = skill(5, 1)}},
+			{name = "Sanctwo", role = "TANK", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SANCTUARY] = skill(5, 2)}},
+		},
+		players = {
+			{name = "Shieldwall", class = "WARRIOR", classID = 1, role = "TANK"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.assignments.Sanctwo[1], T.BUFF_SANCTUARY, "higher sanctuary talent should cover tank sanctuary")
+end)
+
 test("improved wisdom paladin is reserved for wisdom", function()
 	local context = T.BuildSimulationContext(1)
 	local plan = T.BuildSmartPlan(context)
@@ -626,9 +664,313 @@ test("aura assignment gives improved devotion paladin devo first", function()
 	assertEquals(plan.auraAssignments.Tankadin, T.AURA_RETRIBUTION, "next aura should follow devo > ret > concentration")
 end)
 
+test("tank subgroup requires devotion before ret and concentration", function()
+	local context = {
+		playerName = "Devadin",
+		pallyCount = 3,
+		healingPaladinPresent = true,
+		paladins = {
+			{name = "Retadin", role = "DAMAGER", subgroup = 1, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 0), [T.AURA_RETRIBUTION] = skill(5, 1), [T.AURA_CONCENTRATION] = skill(1, 0)}},
+			{name = "Devadin", role = "HEALER", subgroup = 1, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 2), [T.AURA_RETRIBUTION] = skill(5, 0), [T.AURA_CONCENTRATION] = skill(1, 0)}},
+			{name = "Concadin", role = "HEALER", subgroup = 1, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 0), [T.AURA_RETRIBUTION] = skill(5, 0), [T.AURA_CONCENTRATION] = skill(1, 3)}},
+		},
+		players = {
+			{name = "Shieldwall", class = "WARRIOR", classID = 1, role = "TANK", subgroup = 1},
+			{name = "Retadin", class = "PALADIN", classID = 5, role = "DAMAGER", subgroup = 1},
+			{name = "Devadin", class = "PALADIN", classID = 5, role = "HEALER", subgroup = 1},
+			{name = "Concadin", class = "PALADIN", classID = 5, role = "HEALER", subgroup = 1},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.auraAssignments.Devadin, T.AURA_DEVOTION, "tank group should reserve devotion for the improved devotion paladin")
+	assertEquals(plan.auraAssignments.Retadin, T.AURA_RETRIBUTION, "second tank-group aura should use improved retribution")
+	assertEquals(plan.auraAssignments.Concadin, T.AURA_CONCENTRATION, "third tank-group aura should use improved concentration")
+end)
+
+test("non-tank subgroup prefers concentration then devotion before retribution", function()
+	local context = {
+		playerName = "Devadin",
+		pallyCount = 3,
+		healingPaladinPresent = true,
+		paladins = {
+			{name = "Devadin", role = "HEALER", subgroup = 2, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 2), [T.AURA_RETRIBUTION] = skill(5, 0), [T.AURA_CONCENTRATION] = skill(1, 0)}},
+			{name = "Retadin", role = "DAMAGER", subgroup = 2, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 0), [T.AURA_RETRIBUTION] = skill(5, 1), [T.AURA_CONCENTRATION] = skill(1, 0)}},
+			{name = "Concadin", role = "HEALER", subgroup = 2, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 0), [T.AURA_RETRIBUTION] = skill(5, 0), [T.AURA_CONCENTRATION] = skill(1, 3)}},
+		},
+		players = {
+			{name = "Devadin", class = "PALADIN", classID = 5, role = "HEALER", subgroup = 2},
+			{name = "Retadin", class = "PALADIN", classID = 5, role = "DAMAGER", subgroup = 2},
+			{name = "Concadin", class = "PALADIN", classID = 5, role = "HEALER", subgroup = 2},
+			{name = "Backstab", class = "ROGUE", classID = 2, role = "DAMAGER", subgroup = 2},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.auraAssignments.Concadin, T.AURA_CONCENTRATION, "non-tank group should prefer improved concentration first")
+	assertEquals(plan.auraAssignments.Devadin, T.AURA_DEVOTION, "devotion should be the second non-tank group aura")
+	assertEquals(plan.auraAssignments.Retadin, T.AURA_RETRIBUTION, "retribution should be the third non-tank group aura")
+end)
+
+test("improved sanctity aura is top priority when another paladin can cover tank devotion", function()
+	local context = {
+		playerName = "Sanctadin",
+		pallyCount = 2,
+		healingPaladinPresent = false,
+		paladins = {
+			{name = "Sanctadin", role = "TANK", subgroup = 1, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 0), [T.AURA_RETRIBUTION] = skill(5, 0), [T.AURA_CONCENTRATION] = skill(1, 0), [T.AURA_SANCTITY] = skill(1, 2)}, specData = {impSanctityAura = 2}},
+			{name = "Devadin", role = "HEALER", subgroup = 1, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 2), [T.AURA_RETRIBUTION] = skill(5, 0), [T.AURA_CONCENTRATION] = skill(1, 0)}},
+		},
+		players = {
+			{name = "Sanctadin", class = "PALADIN", classID = 5, role = "TANK", subgroup = 1},
+			{name = "Devadin", class = "PALADIN", classID = 5, role = "HEALER", subgroup = 1},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.auraAssignments.Sanctadin, T.AURA_SANCTITY, "improved sanctity paladin should keep sanctity when devotion can still be covered")
+	assertEquals(plan.auraAssignments.Devadin, T.AURA_DEVOTION, "tank group should still get devotion from the other paladin")
+end)
+
+test("solo tank paladin with improved sanctity keeps devotion", function()
+	local context = {
+		playerName = "Sanctank",
+		pallyCount = 1,
+		healingPaladinPresent = false,
+		paladins = {
+			{name = "Sanctank", role = "TANK", subgroup = 1, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 2), [T.AURA_RETRIBUTION] = skill(5, 0), [T.AURA_CONCENTRATION] = skill(1, 0), [T.AURA_SANCTITY] = skill(1, 2)}, specData = {impSanctityAura = 2}},
+		},
+		players = {
+			{name = "Sanctank", class = "PALADIN", classID = 5, role = "TANK", subgroup = 1},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.auraAssignments.Sanctank, T.AURA_DEVOTION, "solo tank paladin should use devotion over improved sanctity")
+end)
+
+test("base sanctity aura without improved points is not assigned", function()
+	local context = {
+		playerName = "Retadin",
+		pallyCount = 2,
+		healingPaladinPresent = true,
+		paladins = {
+			{name = "Retadin", role = "DAMAGER", subgroup = 2, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 0), [T.AURA_RETRIBUTION] = skill(5, 1), [T.AURA_CONCENTRATION] = skill(1, 0), [T.AURA_SANCTITY] = skill(1, 0)}, specData = {impSanctityAura = 0}},
+			{name = "Concadin", role = "HEALER", subgroup = 2, hasAddon = true, skills = {}, auras = {[T.AURA_DEVOTION] = skill(7, 0), [T.AURA_RETRIBUTION] = skill(5, 0), [T.AURA_CONCENTRATION] = skill(1, 3)}},
+		},
+		players = {
+			{name = "Retadin", class = "PALADIN", classID = 5, role = "DAMAGER", subgroup = 2},
+			{name = "Concadin", class = "PALADIN", classID = 5, role = "HEALER", subgroup = 2},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(plan.auraAssignments.Retadin == T.AURA_SANCTITY, false, "sanctity should require improved sanctity talent points")
+end)
+
 test("paladin role can be inferred from improved blessing talents", function()
 	assertEquals(T.InferPaladinRoleFromSkills({[T.BUFF_SANCTUARY] = skill(5, 2)}), "TANK", "improved sanctuary implies tank")
 	assertEquals(T.InferPaladinRoleFromSkills({[T.BUFF_WISDOM] = skill(7, 2)}), "HEALER", "improved wisdom implies healer")
+end)
+
+test("local talent read captures improved blessing ranks", function()
+	local old = {
+		GetActiveTalentGroup = _G.GetActiveTalentGroup,
+		GetNumTalentTabs = _G.GetNumTalentTabs,
+		GetNumTalents = _G.GetNumTalents,
+		GetTalentTabInfo = _G.GetTalentTabInfo,
+		GetTalentInfo = _G.GetTalentInfo,
+	}
+	local talents = {
+		[1] = {
+			{"Improved Blessing of Wisdom", 2},
+		},
+		[2] = {
+			{"Blessing of Kings", 1},
+			{"Improved Blessing of Sanctuary", 2},
+			{"Sanctity Aura", 1},
+			{"Holy Shield", 1},
+		},
+		[3] = {
+			{"Improved Blessing of Might", 2},
+			{"Improved Sanctity Aura", 2},
+		},
+	}
+
+	_G.GetActiveTalentGroup = function()
+		return 1
+	end
+	_G.GetNumTalentTabs = function()
+		return 3
+	end
+	_G.GetNumTalents = function(tab)
+		return #(talents[tab] or {})
+	end
+	_G.GetTalentTabInfo = function(tab)
+		return nil, nil, nil, nil, tab == 2 and 31 or 10
+	end
+	_G.GetTalentInfo = function(tab, index)
+		local talent = talents[tab] and talents[tab][index]
+		return talent and talent[1], nil, nil, nil, talent and talent[2] or 0
+	end
+
+	local result = PPA:ReadLocalTalents()
+	assertEquals(result.activeTab, 2, "active tab should track most spent points")
+	assertEquals(result.impMight, 2, "improved might rank")
+	assertEquals(result.impWisdom, 2, "improved wisdom rank")
+	assertEquals(result.impSanc, 2, "improved sanctuary rank")
+	assertEquals(result.kings, 1, "kings talent rank")
+	assertEquals(result.sanctityAura, 1, "sanctity aura rank")
+	assertEquals(result.impSanctityAura, 2, "improved sanctity aura rank")
+	assertEquals(result.holyShield, 1, "holy shield rank")
+
+	_G.GetActiveTalentGroup = old.GetActiveTalentGroup
+	_G.GetNumTalentTabs = old.GetNumTalentTabs
+	_G.GetNumTalents = old.GetNumTalents
+	_G.GetTalentTabInfo = old.GetTalentTabInfo
+	_G.GetTalentInfo = old.GetTalentInfo
+end)
+
+test("PPA spec data controls improved sanctity aura assignment eligibility", function()
+	local old = {
+		AllPallys = _G.AllPallys,
+		peerSpecs = PPA.peerSpecs,
+	}
+
+	_G.AllPallys = {
+		Retadin = {
+			AuraInfo = {
+				[T.AURA_DEVOTION] = skill(7, 0),
+				[T.AURA_SANCTITY] = skill(1, 2),
+			},
+		},
+	}
+	PPA.peerSpecs = {
+		Retadin = {sanctityAura = 1, impSanctityAura = 0},
+	}
+
+	local auras = PPA:BuildPaladinAuras("Retadin")
+	assertEquals(auras[T.AURA_SANCTITY].talent, 0, "PPA no-improved-sanctity data should override stale PallyPower aura talent")
+	assertEquals(PPA:CanPaladinUseAura({name = "Retadin", role = "DAMAGER", hasAddon = true, auras = auras, specData = PPA.peerSpecs.Retadin}, T.AURA_SANCTITY), false, "base sanctity should not be assignment eligible")
+
+	PPA.peerSpecs.Retadin.impSanctityAura = 2
+	auras = PPA:BuildPaladinAuras("Retadin")
+	assertEquals(auras[T.AURA_SANCTITY].talent, 2, "PPA improved sanctity data should mark sanctity as improved")
+	assertEquals(PPA:CanPaladinUseAura({name = "Retadin", role = "DAMAGER", hasAddon = true, auras = auras, specData = PPA.peerSpecs.Retadin}, T.AURA_SANCTITY), true, "improved sanctity should be assignment eligible")
+
+	_G.AllPallys = old.AllPallys
+	PPA.peerSpecs = old.peerSpecs
+end)
+
+test("PPA spec data overrides PallyPower blessing talents and kings capability", function()
+	local old = {
+		AllPallys = _G.AllPallys,
+		PallyPower = _G.PallyPower,
+		peerSpecs = PPA.peerSpecs,
+	}
+
+	_G.PallyPower = {
+		CanBuff = function()
+			return true
+		end,
+	}
+	_G.AllPallys = {
+		Holyone = {
+			[T.BUFF_WISDOM] = skill(7, 0),
+			[T.BUFF_MIGHT] = skill(7, 0),
+			[T.BUFF_KINGS] = skill(1, 0),
+			[T.BUFF_SANCTUARY] = skill(5, 0),
+		},
+	}
+	PPA.peerSpecs = {
+		Holyone = {activeTab = 1, impMight = 2, impWisdom = 2, impSanc = 2, kings = 0, sanctityAura = 0, holyShield = 0},
+	}
+
+	local skills = PPA:BuildPaladinSkills("Holyone")
+	assertEquals(skills[T.BUFF_MIGHT].talent, 2, "PPA imp might should override PallyPower talent")
+	assertEquals(skills[T.BUFF_WISDOM].talent, 2, "PPA imp wisdom should override PallyPower talent")
+	assertEquals(skills[T.BUFF_SANCTUARY].talent, 2, "PPA imp sanctuary should override PallyPower talent")
+	assertEquals(skills[T.BUFF_KINGS], nil, "PPA no-kings data should remove stale PallyPower kings")
+	assertEquals(T.CanPaladinBuff({name = "Holyone", role = "HEALER", hasAddon = true, skills = skills}, T.BUFF_KINGS), false, "no-kings spec should not be considered castable")
+
+	PPA.peerSpecs.Holyone.kings = 1
+	skills = PPA:BuildPaladinSkills("Holyone")
+	assertEquals(skills[T.BUFF_KINGS].rank, 1, "PPA kings data should preserve kings capability")
+
+	_G.AllPallys = old.AllPallys
+	_G.PallyPower = old.PallyPower
+	PPA.peerSpecs = old.peerSpecs
+end)
+
+test("addon paladin capability defers to PallyPower CanBuff for every spec", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		AllPallys = _G.AllPallys,
+	}
+
+	_G.AllPallys = {
+		Holyone = {[T.BUFF_WISDOM] = skill(7, 2)},
+		Tankadin = {[T.BUFF_SANCTUARY] = skill(5, 2)},
+		Retadin = {[T.BUFF_MIGHT] = skill(7, 2)},
+	}
+	_G.PallyPower = {
+		CanBuff = function(_, name, buff)
+			return _G.AllPallys[name] and _G.AllPallys[name][buff] ~= nil
+		end,
+	}
+
+	local paladins = {
+		{
+			name = "Holyone",
+			role = "HEALER",
+			hasAddon = true,
+			knownBuff = T.BUFF_WISDOM,
+			skills = {
+				[T.BUFF_WISDOM] = skill(7, 2),
+				[T.BUFF_KINGS] = skill(1, 0),
+			},
+		},
+		{
+			name = "Tankadin",
+			role = "TANK",
+			hasAddon = true,
+			knownBuff = T.BUFF_SANCTUARY,
+			skills = {
+				[T.BUFF_SANCTUARY] = skill(5, 2),
+				[T.BUFF_KINGS] = skill(1, 0),
+			},
+		},
+		{
+			name = "Retadin",
+			role = "DAMAGER",
+			hasAddon = true,
+			knownBuff = T.BUFF_MIGHT,
+			skills = {
+				[T.BUFF_MIGHT] = skill(7, 2),
+				[T.BUFF_KINGS] = skill(1, 0),
+			},
+		},
+	}
+
+	for _, paladin in ipairs(paladins) do
+		assertEquals(T.CanPaladinBuff(paladin, paladin.knownBuff), true, paladin.name .. " PallyPower-known blessing should stay castable")
+		assertEquals(T.CanPaladinBuff(paladin, T.BUFF_KINGS), false, paladin.name .. " PallyPower-missing kings should not be castable")
+	end
+
+	_G.PallyPower = old.PallyPower
+	_G.AllPallys = old.AllPallys
+end)
+
+test("manual paladin kings capability is not blocked by spec", function()
+	local paladins = {
+		{name = "Holyone", role = "HEALER", hasAddon = false, skills = {}},
+		{name = "Tankadin", role = "TANK", hasAddon = false, skills = {}},
+		{name = "Retadin", role = "DAMAGER", hasAddon = false, skills = {}},
+	}
+
+	for _, paladin in ipairs(paladins) do
+		assertEquals(T.CanPaladinBuff(paladin, T.BUFF_KINGS), true, paladin.name .. " should be treated as possibly kings-capable without skill data")
+	end
 end)
 
 test("runtime context refresh repairs PallyPower cooldown tables after ScanSpells", function()
@@ -1287,6 +1629,8 @@ test("simulation prot paladin provides blessing of sanctuary", function()
 			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_SANCTUARY), true, "prot paladin can cast sanctuary")
 		end
 		if paladin.name == "PpaSimRet1" then
+			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_KINGS), true, "ret paladin with a kings build should cast kings")
+			assertEquals(paladin.skills[T.BUFF_KINGS].rank, 1, "ret paladin with a kings build should model kings as learned")
 			assertEquals(T.CanPaladinBuff(paladin, T.BUFF_SANCTUARY), false, "ret paladin should not cast sanctuary")
 			assertEquals(paladin.skills[T.BUFF_SANCTUARY], nil, "ret paladin should not model sanctuary as learned")
 			assertEquals(paladin.skills[T.BUFF_MIGHT].talent, 2, "ret paladin should model improved might")
@@ -1360,6 +1704,38 @@ test("simulation never assigns sanctuary to non-prot paladins", function()
 	end
 end)
 
+test("simulation models every paladin spec with and without kings", function()
+	local function findPaladin(context, name)
+		for _, paladin in ipairs(context.paladins) do
+			if paladin.name == name then
+				return paladin
+			end
+		end
+		return nil
+	end
+
+	local function assertNoKingsAssignment(plan, paladinName)
+		for classID, buff in pairs(plan.assignments[paladinName] or {}) do
+			assertEquals(buff == T.BUFF_KINGS, false, paladinName .. " should not receive kings class " .. tostring(classID))
+		end
+	end
+
+	local context = T.BuildSimulationContext(42)
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(T.CanPaladinBuff(findPaladin(context, "PpaSimHoly"), T.BUFF_KINGS), true, "first simulated holy should represent a kings build")
+	assertEquals(T.CanPaladinBuff(findPaladin(context, "PpaSimHoly2"), T.BUFF_KINGS), false, "second simulated holy should represent a no-kings build")
+	assertEquals(T.CanPaladinBuff(findPaladin(context, "PpaSimRet1"), T.BUFF_KINGS), true, "first simulated ret should represent a kings build")
+	assertEquals(T.CanPaladinBuff(findPaladin(context, "PpaSimRet2"), T.BUFF_KINGS), false, "second simulated ret should represent a no-kings build")
+	assertNoKingsAssignment(plan, "PpaSimHoly2")
+	assertNoKingsAssignment(plan, "PpaSimRet2")
+
+	context = T.BuildSimulationContext(9)
+	plan = T.BuildSmartPlan(context)
+	assertEquals(T.CanPaladinBuff(findPaladin(context, "PpaSimProt1"), T.BUFF_KINGS), true, "first simulated prot should represent a kings build")
+	assertEquals(T.CanPaladinBuff(findPaladin(context, "PpaSimProt2"), T.BUFF_KINGS), false, "second simulated prot should represent a no-kings build")
+	assertNoKingsAssignment(plan, "PpaSimProt2")
+end)
+
 test("simulation paladin tank keeps improved wisdom and gets light from ret", function()
 	local context = T.BuildSimulationContext(1)
 	local plan = T.BuildSmartPlan(context)
@@ -1374,17 +1750,14 @@ test("simulation paladin tank keeps improved wisdom and gets light from ret", fu
 	assertEquals(plan.normalAssignments.PpaSimRet1[5].PpaSimProt1, T.BUFF_LIGHT, "ret paladin should replace useless salvation with light")
 end)
 
-test("last pass simplifies prot toward kings without downgrading improved sanctuary", function()
+test("simulation keeps kings on kings-capable paladins while preserving sanctuary", function()
 	local context = T.BuildSimulationContext(1)
 	local plan = T.BuildSmartPlan(context)
-	local distinct = countDistinctBuffs(plan.assignments.PpaSimProt1)
 
 	assertEquals(plan.assignments.PpaSimProt1[1], T.BUFF_SANCTUARY, "improved sanctuary should stay on prot for warriors")
+	assertEquals(plan.assignments.PpaSimRet1[1], T.BUFF_KINGS, "ret with kings should be allowed to cover warrior kings")
 	assertEquals(plan.assignments.PpaSimProt1[2], T.BUFF_KINGS, "prot should take rogue kings after safe swap")
 	assertEquals(plan.assignments.PpaSimProt1[6], T.BUFF_KINGS, "prot should take hunter kings after safe swap")
-	assertEquals(plan.assignments.PpaSimHoly[2], T.BUFF_SALVATION, "holy should receive rogue salvation after swap")
-	assertEquals(plan.assignments.PpaSimHoly[6], T.BUFF_SALVATION, "holy should receive hunter salvation after swap")
-	assertEquals(distinct, 2, "prot should only keep kings plus protected sanctuary")
 end)
 
 test("last pass can create a one-blessing specialist with equal-quality swaps", function()
