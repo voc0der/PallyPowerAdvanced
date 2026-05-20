@@ -4338,6 +4338,39 @@ function PPA:PrintLocalBlessingsReport()
 	return true
 end
 
+function PPA:AdvertiseBlessingsReportHeader(message)
+	if message == "--- Paladin assignments ---" then
+		return "--- Paladin assignments (PallyPowerAdvanced) ---"
+	end
+	return message
+end
+
+function PPA:RunPallyPowerReportWithAdvertisedHeader(originalReport, target, ...)
+	local originalSendChatMessage = _G.SendChatMessage
+	if type(originalSendChatMessage) ~= "function" then
+		return originalReport(target, ...)
+	end
+
+	local replacedHeader = false
+	_G.SendChatMessage = function(message, ...)
+		if not replacedHeader then
+			local advertised = PPA:AdvertiseBlessingsReportHeader(message)
+			if advertised ~= message then
+				replacedHeader = true
+				message = advertised
+			end
+		end
+		return originalSendChatMessage(message, ...)
+	end
+
+	local results = {pcall(originalReport, target, ...)}
+	_G.SendChatMessage = originalSendChatMessage
+	if not results[1] then
+		error(results[2], 0)
+	end
+	return Unpack(results, 2)
+end
+
 function PPA:PrintDebugPlan(plan, context)
 	if not self:IsDebugEnabled() then
 		return
@@ -4414,7 +4447,7 @@ function PPA:InstallLocalReportHook()
 		if PPA:ShouldUseLocalBlessingsReport() then
 			return PPA:PrintLocalBlessingsReport()
 		end
-		return originalReport(target, ...)
+		return PPA:RunPallyPowerReportWithAdvertisedHeader(originalReport, target, ...)
 	end
 end
 
@@ -4959,6 +4992,9 @@ PPA._test = {
 	end,
 	PrintLocalBlessingsReport = function()
 		return PPA:PrintLocalBlessingsReport()
+	end,
+	AdvertiseBlessingsReportHeader = function(message)
+		return PPA:AdvertiseBlessingsReportHeader(message)
 	end,
 	InstallLocalReportHook = function()
 		return PPA:InstallLocalReportHook()

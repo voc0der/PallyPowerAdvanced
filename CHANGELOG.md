@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.29] - 2026-05-20
+
+### Changed
+- Blessings Report chat headers now include PallyPowerAdvanced so party and raid members know which addon produced them.
+
+### Tests
+- Add coverage for the PallyPower report hook rewriting only the outgoing report header.
+
 ## [0.1.28] - 2026-05-20
 
 ### Changed

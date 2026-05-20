@@ -2426,6 +2426,63 @@ test("blessings report hook leaves leader reports to PallyPower", function()
 	PPA.simulation = old.simulation
 end)
 
+test("blessings report hook advertises PallyPowerAdvanced in outgoing report header", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		IsInRaid = _G.IsInRaid,
+		UnitIsGroupLeader = _G.UnitIsGroupLeader,
+		UnitIsGroupAssistant = _G.UnitIsGroupAssistant,
+		SendChatMessage = _G.SendChatMessage,
+		localReportHookInstalledFor = PPA.localReportHookInstalledFor,
+		simulation = PPA.simulation,
+	}
+	local messages = {}
+	local sendChatMessage = function(message, chatType)
+		messages[#messages + 1] = {message = message, chatType = chatType}
+	end
+
+	PPA.localReportHookInstalledFor = nil
+	PPA.simulation = nil
+	_G.SendChatMessage = sendChatMessage
+	_G.PallyPower = {
+		player = "Holyone",
+		Report = function(_, chatType)
+			_G.SendChatMessage("--- Paladin assignments ---", chatType)
+			_G.SendChatMessage("Holyone: Blessing of Kings", chatType)
+			_G.SendChatMessage("--- End of assignments ---", chatType)
+		end,
+		CheckLeader = function()
+			return true
+		end,
+	}
+	_G.IsInRaid = function()
+		return true
+	end
+	_G.UnitIsGroupLeader = function()
+		return true
+	end
+	_G.UnitIsGroupAssistant = function()
+		return false
+	end
+
+	T.InstallLocalReportHook()
+	_G.PallyPower:Report("RAID")
+
+	assertEquals(messages[1].message, "--- Paladin assignments (PallyPowerAdvanced) ---", "outgoing report header should advertise PPA")
+	assertEquals(messages[1].chatType, "RAID", "report chat type should pass through")
+	assertEquals(messages[2].message, "Holyone: Blessing of Kings", "assignment line should pass through")
+	assertEquals(messages[3].message, "--- End of assignments ---", "end marker should pass through")
+	assertEquals(_G.SendChatMessage, sendChatMessage, "SendChatMessage should be restored after report")
+
+	_G.PallyPower = old.PallyPower
+	_G.IsInRaid = old.IsInRaid
+	_G.UnitIsGroupLeader = old.UnitIsGroupLeader
+	_G.UnitIsGroupAssistant = old.UnitIsGroupAssistant
+	_G.SendChatMessage = old.SendChatMessage
+	PPA.localReportHookInstalledFor = old.localReportHookInstalledFor
+	PPA.simulation = old.simulation
+end)
+
 test("PallyPower auto assign starts conflict watch", function()
 	local old = {
 		PallyPower = _G.PallyPower,
