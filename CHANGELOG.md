@@ -3,10 +3,10 @@
 ## [0.1.37] - 2026-05-25
 
 ### Fixed
-- Restore feral druid tank priority to prefer Blessing of Might before Blessing of Light, while still preferring Light before Wisdom.
+- Restore feral druid tank priority to prefer Blessing of Might before Blessing of Light when a holy paladin is available, while still preferring Light before Wisdom and omitting Light without a holy paladin.
 
 ### Tests
-- Update tank druid priority coverage to lock in `Might > Light > Wisdom`.
+- Update tank druid priority coverage to lock in `Might > Light > Wisdom` with a holy paladin, and no Light without one.
 
 ## [0.1.36] - 2026-05-25
 
