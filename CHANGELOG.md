@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.33] - 2026-05-25
+
+### Fixed
+- Refresh PallyPower Classic's standalone options frame after injecting PallyPowerAdvanced settings so the `Advanced` tab appears from the in-addon settings button as well as the AddOns options category.
+
+### Tests
+- Add coverage for refreshing the standalone PallyPower config frame with the injected `Advanced` tab.
+
 ## [0.1.32] - 2026-05-25
 
 ### Changed
