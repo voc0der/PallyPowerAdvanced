@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.39] - 2026-05-25
+
+### Fixed
+- Register the standalone `PallyPowerAdvanced` AddOns options category with native TBC Anniversary vertical Settings controls, matching the working `PlayerRoleOptions` pattern.
+
+### Tests
+- Update options registration coverage to assert native Settings proxy settings and checkbox controls.
+
 ## [0.1.38] - 2026-05-25
 
 ### Fixed

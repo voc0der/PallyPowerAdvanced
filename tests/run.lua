@@ -928,7 +928,7 @@ test("PPA registers its own AddOns options panel", function()
 	PPA.optionsRegistered = old.optionsRegistered
 end)
 
-test("PPA registers its AddOns panel through TBC Settings when available", function()
+test("PPA registers its AddOns panel through native TBC Settings when available", function()
 	local old = {
 		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
 		LibStub = _G.LibStub,
@@ -941,46 +941,43 @@ test("PPA registers its AddOns panel through TBC Settings when available", funct
 		optionsRegistered = PPA.optionsRegistered,
 	}
 	local registered
-	local canvas
+	local category
 	local addonCategory
-	local opened
+	local settings = {}
+	local checkboxes = {}
 	local addToBlizCalled = false
-	local released = false
 
 	local dialog = {
 		AddToBlizOptions = function()
 			addToBlizCalled = true
 		end,
-		Open = function(_, appName, widget)
-			opened = {appName = appName, widget = widget}
-		end,
-	}
-	local callbacks = {}
-	local widget = {
-		frame = {},
-		SetName = function(self, name, parent)
-			self.frame.name = name
-			self.frame.parent = parent
-		end,
-		SetTitle = function(self, title)
-			self.frame.title = title
-		end,
-		SetUserData = function(self, key, value)
-			self.userData = self.userData or {}
-			self.userData[key] = value
-		end,
-		SetCallback = function(_, event, callback)
-			callbacks[event] = callback
-		end,
-		ReleaseChildren = function()
-			released = true
-		end,
 	}
 
 	_G.Settings = {
-		RegisterCanvasLayoutCategory = function(frame, name)
-			canvas = {frame = frame, name = name}
-			return "settings-category", "settings-layout"
+		VarType = {Boolean = "boolean"},
+		RegisterVerticalLayoutCategory = function(name)
+			category = {name = name}
+			return category, "settings-layout"
+		end,
+		RegisterProxySetting = function(categoryArg, variable, variableType, name, defaultValue, getValue, setValue)
+			local setting = {
+				category = categoryArg,
+				variable = variable,
+				variableType = variableType,
+				name = name,
+				defaultValue = defaultValue,
+				getValue = getValue,
+				setValue = setValue,
+			}
+			settings[#settings + 1] = setting
+			return setting
+		end,
+		CreateCheckbox = function(categoryArg, setting, tooltip)
+			checkboxes[#checkboxes + 1] = {
+				category = categoryArg,
+				setting = setting,
+				tooltip = tooltip,
+			}
 		end,
 		RegisterAddOnCategory = function(category)
 			addonCategory = category
@@ -995,13 +992,6 @@ test("PPA registers its AddOns panel through TBC Settings when available", funct
 			}
 		elseif name == "AceConfigDialog-3.0" then
 			return dialog
-		elseif name == "AceGUI-3.0" then
-			return {
-				Create = function(_, widgetType)
-					assertEquals(widgetType, "BlizOptionsGroup", "settings fallback should use Ace's Blizzard options widget")
-					return widget
-				end,
-			}
 		end
 		error("unexpected LibStub lookup: " .. tostring(name))
 	end
@@ -1016,20 +1006,30 @@ test("PPA registers its AddOns panel through TBC Settings when available", funct
 
 	assertEquals(T.RegisterPallyPowerAdvancedOptions(), true, "options should register with Settings")
 	assertEquals(registered.appName, "PallyPowerAdvanced", "AceConfig app name")
-	assertEquals(canvas.frame, widget.frame, "Settings should register the Ace canvas frame")
-	assertEquals(canvas.name, "PallyPowerAdvanced", "Settings category display name")
-	assertEquals(addonCategory, "settings-category", "Settings category should be added to AddOns")
+	assertEquals(category.name, "PallyPowerAdvanced", "Settings category display name")
+	assertEquals(addonCategory, category, "Settings category should be added to AddOns")
 	assertEquals(addToBlizCalled, false, "modern Settings path should not use legacy InterfaceOptions")
-	assertEquals(PPA.optionsFrame, widget.frame, "options frame should be stored")
-	assertEquals(PPA.optionsWidget, widget, "options widget should be retained")
-	assertEquals(PPA.optionsCategory, "settings-category", "options category should be stored")
-	assertEquals(dialog.BlizOptions.PallyPowerAdvanced.PallyPowerAdvanced, widget, "Ace refresh table should include the widget")
-
-	callbacks.OnShow(widget)
-	assertEquals(opened.appName, "PallyPowerAdvanced", "Settings canvas should open the Ace options")
-	assertEquals(opened.widget, widget, "Settings canvas should open into its widget")
-	callbacks.OnHide(widget)
-	assertEquals(released, true, "Settings canvas should release children when hidden")
+	assertEquals(PPA.optionsFrame, nil, "native Settings category should not need an options frame")
+	assertEquals(PPA.optionsWidget, nil, "native Settings category should not need an Ace widget")
+	assertEquals(PPA.optionsCategory, category, "options category should be stored")
+	assertEquals(#settings, 2, "two native Settings proxy settings should be registered")
+	assertEquals(#checkboxes, 2, "two native Settings checkboxes should be registered")
+	assertEquals(settings[1].variable, "PALLYPOWERADVANCED_ALWAYS_PREFER_WISDOM_ON_HEALERS", "healer setting variable")
+	assertEquals(settings[1].variableType, "boolean", "healer setting should be boolean")
+	assertEquals(settings[1].name, "Always Prefer Wisdom on Healers", "healer setting display name")
+	assertEquals(settings[1].defaultValue, false, "healer setting default")
+	assertEquals(settings[1].getValue(), false, "healer setting should read false by default")
+	settings[1].setValue(true)
+	assertEquals(_G.PallyPowerAdvancedDB.alwaysPreferWisdomOnHealers, true, "healer setting should write DB")
+	assertEquals(settings[2].variable, "PALLYPOWERADVANCED_ALWAYS_PREFER_WISDOM_ON_PALADIN_TANKS", "paladin tank setting variable")
+	assertEquals(settings[2].variableType, "boolean", "paladin tank setting should be boolean")
+	assertEquals(settings[2].name, "Always Prefer Wisdom for Paladin Tanks", "paladin tank setting display name")
+	assertEquals(settings[2].defaultValue, false, "paladin tank setting default")
+	assertEquals(settings[2].getValue(), false, "paladin tank setting should read false by default")
+	settings[2].setValue(true)
+	assertEquals(_G.PallyPowerAdvancedDB.alwaysPreferWisdomOnPaladinTanks, true, "paladin tank setting should write DB")
+	assertEquals(checkboxes[1].setting, settings[1], "healer checkbox should use healer setting")
+	assertEquals(checkboxes[2].setting, settings[2], "paladin tank checkbox should use paladin tank setting")
 
 	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
 	_G.LibStub = old.LibStub
