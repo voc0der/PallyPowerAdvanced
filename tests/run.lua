@@ -304,18 +304,21 @@ test("advanced setting can prefer wisdom over kings for paladin tanks", function
 	PPA.peerSpecs["Tankadin"] = nil
 end)
 
-test("advanced paladin tank wisdom setting can be read from PallyPower options", function()
+test("advanced paladin tank wisdom setting can be read from PPA options", function()
 	local old = {
-		PallyPower = _G.PallyPower,
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
+		db = PPA.db,
 	}
 	local tankadin = {name = "Tankadin", class = "PALADIN", classID = 5, role = "TANK"}
 
-	_G.PallyPower = {opt = {AlwaysPreferWisdomOnPaladinTanks = true}}
+	_G.PallyPowerAdvancedDB = {alwaysPreferWisdomOnPaladinTanks = true}
+	PPA.db = _G.PallyPowerAdvancedDB
 	local priority = T.GetPriorityForUnit(tankadin, {pallyCount = 2})
-	assertEquals(priority[1], T.BUFF_WISDOM, "PallyPower option should prefer paladin tank wisdom")
-	assertEquals(priority[2], T.BUFF_KINGS, "PallyPower option should put wisdom above kings")
+	assertEquals(priority[1], T.BUFF_WISDOM, "PPA option should prefer paladin tank wisdom")
+	assertEquals(priority[2], T.BUFF_KINGS, "PPA option should put wisdom above kings")
 
-	_G.PallyPower = old.PallyPower
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
+	PPA.db = old.db
 end)
 
 test("elemental shaman damage prefers wisdom where enhancement prefers might", function()
@@ -809,188 +812,117 @@ test("advanced setting can prefer wisdom for healers without improved wisdom", f
 	assertEquals(priority[2], T.BUFF_KINGS, "kings should follow wisdom")
 end)
 
-test("advanced healer wisdom setting can be read from PallyPower options", function()
+test("advanced healer wisdom setting can be read from PPA options", function()
 	local old = {
-		PallyPower = _G.PallyPower,
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
+		db = PPA.db,
 	}
 	local priest = {name = "Prayer", class = "PRIEST", classID = 3, role = "HEALER"}
 
-	_G.PallyPower = {opt = {AlwaysPreferWisdomOnHealers = true}}
+	_G.PallyPowerAdvancedDB = {alwaysPreferWisdomOnHealers = true}
+	PPA.db = _G.PallyPowerAdvancedDB
 	local priority = T.GetPriorityForUnit(priest, {improvedWisdomPaladinPresent = false})
-	assertEquals(priority[1], T.BUFF_WISDOM, "PallyPower option should prefer healer wisdom")
+	assertEquals(priority[1], T.BUFF_WISDOM, "PPA option should prefer healer wisdom")
 
-	_G.PallyPower = old.PallyPower
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
+	PPA.db = old.db
 end)
 
-test("PPA injects the Advanced tab into PallyPower options", function()
+test("PPA registers its own AddOns options panel", function()
 	local old = {
 		PallyPower = _G.PallyPower,
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
 		LibStub = _G.LibStub,
-		PallyPowerConfigFrame = _G.PallyPowerConfigFrame,
+		db = PPA.db,
+		options = PPA.options,
+		optionsFrame = PPA.optionsFrame,
+		optionsRegistered = PPA.optionsRegistered,
 	}
-	local notified
+	local registered
+	local added
 
 	_G.LibStub = function(name)
-		assertEquals(name, "AceConfigRegistry-3.0", "AceConfig registry lookup")
-		return {
-			NotifyChange = function(_, appName)
-				notified = appName
-			end,
-		}
-	end
-	_G.PallyPower = {
-		opt = {},
-		options = {args = {}},
-	}
-	_G.PallyPowerConfigFrame = nil
-
-	assertEquals(T.EnsurePallyPowerAdvancedOptions(), true, "options should be injected")
-	local advanced = _G.PallyPower.options.args.advanced
-	assertEquals(advanced.name, "Advanced", "tab name")
-	assertEquals(advanced.args.advanced_settings.name, "PallyPowerAdvanced Settings", "header")
-	local option = advanced.args.advanced_settings.args.always_prefer_wisdom_on_healers
-	assertEquals(option.name, "Always Prefer Wisdom on Healers", "setting name")
-	assertEquals(option.get(), false, "default should be false")
-	option.set(nil, true)
-	assertEquals(_G.PallyPower.opt.AlwaysPreferWisdomOnHealers, true, "setting should write to PallyPower profile")
-	local tankOption = advanced.args.advanced_settings.args.always_prefer_wisdom_on_paladin_tanks
-	assertEquals(tankOption.name, "Always Prefer Wisdom for Paladin Tanks", "paladin tank setting name")
-	assertEquals(tankOption.get(), false, "paladin tank default should be false")
-	tankOption.set(nil, true)
-	assertEquals(_G.PallyPower.opt.AlwaysPreferWisdomOnPaladinTanks, true, "paladin tank setting should write to PallyPower profile")
-	assertEquals(notified, "PallyPower", "AceConfig should be notified")
-
-	_G.PallyPower = old.PallyPower
-	_G.LibStub = old.LibStub
-	_G.PallyPowerConfigFrame = old.PallyPowerConfigFrame
-end)
-
-test("PPA rebuilds the standalone PallyPower config frame after injecting options", function()
-	local old = {
-		PallyPower = _G.PallyPower,
-		LibStub = _G.LibStub,
-		PallyPowerConfigFrame = _G.PallyPowerConfigFrame,
-		UISpecialFrames = _G.UISpecialFrames,
-		standaloneFrame = PPA.pallyPowerStandaloneFrame,
-		standaloneReady = PPA.pallyPowerStandaloneOptionsReady,
-	}
-	local notified
-	local defaulted
-	local created
-	local opened
-	local resized
-	local oldHidden
-	local newHidden
-	local oldFrame = {
-		Hide = function()
-			oldHidden = true
-		end,
-		IsShown = function()
-			return false
-		end,
-	}
-	local newFrame = {}
-	local standaloneContainer = {
-		frame = newFrame,
-		EnableResize = function(_, value)
-			resized = value
-		end,
-		Hide = function()
-			newHidden = true
-		end,
-	}
-	newFrame.obj = standaloneContainer
-
-	_G.LibStub = function(name)
-		if name == "AceConfigRegistry-3.0" then
+		if name == "AceConfig-3.0" then
 			return {
-				NotifyChange = function(_, appName)
-					notified = appName
-				end,
-			}
-		elseif name == "AceGUI-3.0" then
-			return {
-				Create = function(_, widgetType)
-					created = widgetType
-					return standaloneContainer
+				RegisterOptionsTable = function(_, appName, options, slash)
+					registered = {appName = appName, options = options, slash = slash}
 				end,
 			}
 		elseif name == "AceConfigDialog-3.0" then
 			return {
-				SetDefaultSize = function(_, appName, width, height)
-					defaulted = {appName = appName, width = width, height = height}
-				end,
-				Open = function(_, appName, container)
-					opened = {appName = appName, container = container}
+				AddToBlizOptions = function(_, appName, name, parent)
+					added = {appName = appName, name = name, parent = parent}
+					return "options-frame"
 				end,
 			}
 		end
 		error("unexpected LibStub lookup: " .. tostring(name))
 	end
+	_G.PallyPowerAdvancedDB = {}
+	PPA.db = nil
+	PPA.options = nil
+	PPA.optionsFrame = nil
+	PPA.optionsRegistered = nil
 	_G.PallyPower = {
 		opt = {},
 		options = {args = {}},
 	}
-	_G.PallyPowerConfigFrame = oldFrame
-	_G.UISpecialFrames = {}
-	PPA.pallyPowerStandaloneFrame = nil
-	PPA.pallyPowerStandaloneOptionsReady = nil
 
-	assertEquals(T.EnsurePallyPowerAdvancedOptions(), true, "options should be injected")
-	assertEquals(notified, "PallyPower", "AceConfig should be notified")
-	assertEquals(oldHidden, true, "stale standalone frame should be hidden")
-	assertEquals(created, "Frame", "standalone frame should be recreated")
-	assertEquals(resized, false, "standalone frame resize should be disabled")
-	assertEquals(defaulted.appName, "PallyPower", "standalone app default size app")
-	assertEquals(defaulted.width, 625, "standalone width")
-	assertEquals(defaulted.height, 580, "standalone height")
-	assertEquals(opened.appName, "PallyPower", "standalone config app")
-	assertEquals(opened.container, standaloneContainer, "standalone AceGUI container")
-	assertEquals(_G.PallyPowerConfigFrame, newFrame, "global standalone frame should be replaced")
-	assertEquals(_G.UISpecialFrames[1], "PallyPowerConfigFrame", "standalone frame should stay an escape-close frame")
-	assertEquals(newHidden, true, "hidden standalone frame should stay hidden after rebuild")
+	assertEquals(T.RegisterPallyPowerAdvancedOptions(), true, "options should be registered")
+	assertEquals(registered.appName, "PallyPowerAdvanced", "AceConfig app name")
+	assertEquals(registered.slash[1], "ppa", "short slash alias")
+	assertEquals(registered.slash[2], "pallypoweradvanced", "long slash alias")
+	assertEquals(added.appName, "PallyPowerAdvanced", "AddOns category app name")
+	assertEquals(added.name, "PallyPowerAdvanced", "AddOns category display name")
+	assertEquals(added.parent, nil, "PPA options should not be nested under PallyPower")
+	assertEquals(_G.PallyPower.options.args.advanced, nil, "PPA should not inject a PallyPower tab")
+	assertEquals(PPA.optionsFrame, "options-frame", "options frame should be stored")
+
+	local settings = registered.options.args.settings.args.advanced_settings
+	assertEquals(settings.name, "PallyPowerAdvanced Settings", "header")
+	local option = settings.args.always_prefer_wisdom_on_healers
+	assertEquals(option.name, "Always Prefer Wisdom on Healers", "setting name")
+	assertEquals(option.get(), false, "default should be false")
+	option.set(nil, true)
+	assertEquals(_G.PallyPowerAdvancedDB.alwaysPreferWisdomOnHealers, true, "setting should write to PPA profile")
+	local tankOption = settings.args.always_prefer_wisdom_on_paladin_tanks
+	assertEquals(tankOption.name, "Always Prefer Wisdom for Paladin Tanks", "paladin tank setting name")
+	assertEquals(tankOption.get(), false, "paladin tank default should be false")
+	tankOption.set(nil, true)
+	assertEquals(_G.PallyPowerAdvancedDB.alwaysPreferWisdomOnPaladinTanks, true, "paladin tank setting should write to PPA profile")
 
 	_G.PallyPower = old.PallyPower
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
 	_G.LibStub = old.LibStub
-	_G.PallyPowerConfigFrame = old.PallyPowerConfigFrame
-	_G.UISpecialFrames = old.UISpecialFrames
-	PPA.pallyPowerStandaloneFrame = old.standaloneFrame
-	PPA.pallyPowerStandaloneOptionsReady = old.standaloneReady
+	PPA.db = old.db
+	PPA.options = old.options
+	PPA.optionsFrame = old.optionsFrame
+	PPA.optionsRegistered = old.optionsRegistered
 end)
 
-test("PPA wraps the PallyPower config button path before the frame toggles", function()
+test("PPA migrates legacy PallyPower advanced options into its own profile", function()
 	local old = {
 		PallyPower = _G.PallyPower,
-		LibStub = _G.LibStub,
-		configHooked = PPA.pallyPowerConfigWindowHooked,
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
+		db = PPA.db,
 	}
-	local openedWithAdvanced
-
-	_G.LibStub = function(name)
-		if name == "AceConfigRegistry-3.0" then
-			return {
-				NotifyChange = function()
-				end,
-			}
-		end
-		return nil
-	end
 	_G.PallyPower = {
-		opt = {},
-		options = {args = {}},
-		OpenConfigWindow = function(self)
-			openedWithAdvanced = self.options.args.advanced ~= nil
-		end,
+		opt = {
+			AlwaysPreferWisdomOnHealers = true,
+			AlwaysPreferWisdomOnPaladinTanks = true,
+		},
 	}
-	PPA.pallyPowerConfigWindowHooked = nil
+	_G.PallyPowerAdvancedDB = {}
+	PPA.db = nil
 
-	assertEquals(T.InstallPallyPowerConfigWindowHook(), true, "config window hook should install")
-	_G.PallyPower:OpenConfigWindow()
-	assertEquals(openedWithAdvanced, true, "advanced options should be injected before original open")
+	local db = PPA:EnsureDB()
+	assertEquals(db.alwaysPreferWisdomOnHealers, true, "legacy healer setting should migrate")
+	assertEquals(db.alwaysPreferWisdomOnPaladinTanks, true, "legacy paladin tank setting should migrate")
+	assertEquals(db.advancedOptionsMigrated, true, "migration should be marked complete")
 
 	_G.PallyPower = old.PallyPower
-	_G.LibStub = old.LibStub
-	PPA.pallyPowerConfigWindowHooked = old.configHooked
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
+	PPA.db = old.db
 end)
 
 test("aura assignment gives improved devotion paladin devo first", function()
