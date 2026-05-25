@@ -152,7 +152,7 @@ local GENERAL_TIE_ORDER = {
 	[BUFF_LIGHT] = 6,
 }
 
-local PVP_REMOVED_BLESSINGS = {
+local PVP_FALLBACK_BLESSINGS = {
 	[BUFF_SALVATION] = true,
 }
 
@@ -556,16 +556,20 @@ local function FilterPriorityForContext(priority, context)
 
 	local filtered = {}
 	local lowPriority = {}
+	local fallback = {}
 	for _, buff in ipairs(priority or {}) do
-		if not PVP_REMOVED_BLESSINGS[buff] then
-			if PVP_LOW_PRIORITY_BLESSINGS[buff] then
-				AddUnique(lowPriority, buff)
-			else
-				AddUnique(filtered, buff)
-			end
+		if PVP_FALLBACK_BLESSINGS[buff] then
+			AddUnique(fallback, buff)
+		elseif PVP_LOW_PRIORITY_BLESSINGS[buff] then
+			AddUnique(lowPriority, buff)
+		else
+			AddUnique(filtered, buff)
 		end
 	end
 	for _, buff in ipairs(lowPriority) do
+		AddUnique(filtered, buff)
+	end
+	for _, buff in ipairs(fallback) do
 		AddUnique(filtered, buff)
 	end
 	return filtered
@@ -1852,7 +1856,7 @@ function PPA:BuildSmartPlan(context)
 	end
 	plan.debugLines[#plan.debugLines + 1] = "Paladins considered: " .. table.concat(pallyLabels, ", ")
 	if ContextIsPvP(context) then
-		plan.debugLines[#plan.debugLines + 1] = "PvP instance detected; skipping Salvation and treating Sanctuary as lowest priority."
+		plan.debugLines[#plan.debugLines + 1] = "PvP instance detected; treating low-value blessings as fallback purge buffers."
 	end
 
 	local groups = GroupPlayersByClass(context.players)

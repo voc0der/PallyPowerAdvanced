@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.40] - 2026-05-25
+
+### Fixed
+- Keep Blessing of Salvation available as a last-resort PvP assignment so extra paladins can provide purge-buffer buffs after useful blessings are covered.
+
+### Tests
+- Update PvP priority coverage for fallback Salvation and add coverage that PvP Smart-Assign fills an otherwise empty blessing slot with Salvation.
+
 ## [0.1.39] - 2026-05-25
 
 ### Fixed
