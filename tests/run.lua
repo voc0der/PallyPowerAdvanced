@@ -191,7 +191,7 @@ test("druid tank ranks might above light above wisdom only when a holy paladin i
 	end
 end)
 
-test("pvp priority removes salvation and pushes sanctuary last", function()
+test("pvp priority demotes salvation behind sanctuary fallback", function()
 	local context = {pvpInstance = true, healingPaladinPresent = true, improvedWisdomPaladinPresent = true, pallyCount = 4}
 	local rogue = {name = "Sneaky", class = "ROGUE", classID = 2, role = "DAMAGER"}
 	local tank = {name = "Shieldwall", class = "WARRIOR", classID = 1, role = "TANK"}
@@ -200,17 +200,15 @@ test("pvp priority removes salvation and pushes sanctuary last", function()
 	assertEquals(priority[1], T.BUFF_MIGHT, "rogue pvp first priority")
 	assertEquals(priority[2], T.BUFF_KINGS, "rogue pvp second priority")
 	assertEquals(priority[3], T.BUFF_LIGHT, "rogue pvp third priority")
-	assertEquals(priority[4], T.BUFF_SANCTUARY, "rogue pvp sanctuary should be last")
-	for _, buff in ipairs(priority) do
-		assertEquals(buff == T.BUFF_SALVATION, false, "pvp priority should omit salvation")
-	end
+	assertEquals(priority[4], T.BUFF_SANCTUARY, "rogue pvp sanctuary should trail useful blessings")
+	assertEquals(priority[5], T.BUFF_SALVATION, "rogue pvp salvation should be last-resort filler")
 
 	priority = T.GetPriorityForUnit(tank, context)
 	assertEquals(priority[1], T.BUFF_KINGS, "tank pvp first priority")
 	assertEquals(priority[#priority], T.BUFF_SANCTUARY, "tank pvp sanctuary should be last")
 end)
 
-test("pvp plan skips salvation without forcing sanctuary over better blessings", function()
+test("pvp plan does not use fallback salvation before better blessings", function()
 	local context = baseContext()
 	context.pvpInstance = true
 	context.pvpInstanceType = "pvp"
@@ -228,8 +226,43 @@ test("pvp plan skips salvation without forcing sanctuary over better blessings",
 	assertEquals(warriorBuffs[T.BUFF_KINGS], true, "pvp warriors should get kings")
 	assertEquals(warriorBuffs[T.BUFF_MIGHT], true, "pvp warriors should get might")
 	assertEquals(plan.normalAssignments.Tankadin and plan.normalAssignments.Tankadin[1], nil, "pvp should not force tank sanctuary fallback")
-	assertEquals(planContainsBuff(plan, T.BUFF_SALVATION), false, "pvp plan should never assign salvation")
+	assertEquals(planContainsBuff(plan, T.BUFF_SALVATION), false, "pvp plan should not assign salvation before better blessings")
 	assertEquals(planContainsBuff(plan, T.BUFF_SANCTUARY), false, "pvp plan should prefer better blessings before sanctuary")
+end)
+
+test("pvp plan assigns salvation as a purge-buffer filler", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 4,
+		healingPaladinPresent = true,
+		pvpInstance = true,
+		pvpInstanceType = "pvp",
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Retadin", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_MIGHT] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Tankadin", role = "TANK", hasAddon = true, skills = {[T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Flexadin", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+		},
+		players = {
+			{name = "Sneaky", class = "ROGUE", classID = 2, role = "DAMAGER"},
+			{name = "Backstab", class = "ROGUE", classID = 2, role = "DAMAGER"},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	local rogueAssignmentCount = 0
+	local rogueBuffs = {}
+	for _, classMap in pairs(plan.assignments or {}) do
+		if classMap[2] then
+			rogueAssignmentCount = rogueAssignmentCount + 1
+			rogueBuffs[classMap[2]] = true
+		end
+	end
+	assertEquals(rogueAssignmentCount, 4, "pvp rogues should use all available blessing slots")
+	assertEquals(rogueBuffs[T.BUFF_MIGHT], true, "pvp rogues should get might")
+	assertEquals(rogueBuffs[T.BUFF_KINGS], true, "pvp rogues should get kings")
+	assertEquals(rogueBuffs[T.BUFF_LIGHT], true, "pvp rogues should get light")
+	assertEquals(rogueBuffs[T.BUFF_SALVATION], true, "pvp rogues should get salvation when it fills an otherwise empty slot")
 end)
 
 test("pvp plan can still assign sanctuary when it is the only castable blessing", function()
@@ -256,7 +289,7 @@ test("pvp plan can still assign sanctuary when it is the only castable blessing"
 
 	local plan = T.BuildSmartPlan(context)
 	assertEquals(plan.assignments.Tankadin[1], T.BUFF_SANCTUARY, "pvp should keep sanctuary when it is the only castable option")
-	assertEquals(planContainsBuff(plan, T.BUFF_SALVATION), false, "pvp plan should still omit salvation")
+	assertEquals(planContainsBuff(plan, T.BUFF_SALVATION), false, "pvp plan should not invent unavailable salvation")
 end)
 
 test("prot paladin priority uses confirmed spec data over pally count heuristic", function()
