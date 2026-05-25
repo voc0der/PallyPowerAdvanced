@@ -169,15 +169,15 @@ test("warrior tank gets light over might when a holy paladin is present", functi
 	assertEquals(plan.normalAssignments.Retadin[1].Slammer, nil, "DPS warriors should keep class-wide might")
 end)
 
-test("druid tank ranks light above might and wisdom when a holy paladin is present", function()
+test("druid tank ranks might above light above wisdom when a holy paladin is present", function()
 	local context = {pallyCount = 3, healingPaladinPresent = true, improvedWisdomPaladinPresent = true}
 	local tank = {name = "Bearwall", class = "DRUID", classID = 4, role = "TANK", spec = "FERAL_TANK"}
 
 	local priority = T.GetPriorityForUnit(tank, context)
 	assertEquals(priority[1], T.BUFF_KINGS, "druid tank first priority")
 	assertEquals(priority[2], T.BUFF_SANCTUARY, "druid tank second priority")
-	assertEquals(priority[3], T.BUFF_LIGHT, "druid tank should prefer light before might")
-	assertEquals(priority[4], T.BUFF_MIGHT, "druid tank should prefer might before wisdom")
+	assertEquals(priority[3], T.BUFF_MIGHT, "druid tank should prefer might before light")
+	assertEquals(priority[4], T.BUFF_LIGHT, "druid tank should prefer light before wisdom")
 	assertEquals(priority[5], T.BUFF_WISDOM, "druid tank should put wisdom last")
 end)
 
@@ -2133,7 +2133,7 @@ test("simulation paladin tank keeps improved wisdom and gets light from ret", fu
 	assertEquals(plan.normalAssignments.PpaSimRet1[5].PpaSimProt1, T.BUFF_LIGHT, "ret paladin should replace useless salvation with light")
 end)
 
-test("simulation tank druid gets holy light before might when wisdom is class-wide", function()
+test("simulation tank druid keeps might before light while avoiding wisdom", function()
 	local context = T.BuildSimulationContext(5)
 	local plan = T.BuildSmartPlan(context)
 
@@ -2141,13 +2141,13 @@ test("simulation tank druid gets holy light before might when wisdom is class-wi
 	assertEquals(plan.assignments.PpaSimRet1[4], T.BUFF_SALVATION, "seed should put ret salvation on druids")
 	assertEquals(
 		plan.normalAssignments.PpaSimHoly and plan.normalAssignments.PpaSimHoly[4] and plan.normalAssignments.PpaSimHoly[4].PpaSimTankDruid1,
-		T.BUFF_LIGHT,
-		"holy wisdom should become light for the tank druid"
+		T.BUFF_MIGHT,
+		"holy wisdom should become might for the tank druid"
 	)
 	assertEquals(
 		plan.normalAssignments.PpaSimRet1 and plan.normalAssignments.PpaSimRet1[4] and plan.normalAssignments.PpaSimRet1[4].PpaSimTankDruid1,
-		T.BUFF_MIGHT,
-		"ret salvation can become might after light is covered"
+		T.BUFF_LIGHT,
+		"ret salvation can become light after might is covered"
 	)
 	local warriorHasLight = false
 	for _, classMap in pairs(plan.normalAssignments or {}) do
