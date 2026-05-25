@@ -638,7 +638,7 @@ function PPA:GetBasePriorityForUnit(unit, context)
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_WISDOM, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "DRUID" then
 		if role == ROLE_TANK then
-			return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_LIGHT, BUFF_MIGHT, BUFF_WISDOM)
+			return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_MIGHT, BUFF_LIGHT, BUFF_WISDOM)
 		elseif role == ROLE_HEALER then
 			if not preferWisdomOnHealers then
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)

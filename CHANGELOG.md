@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.37] - 2026-05-25
+
+### Fixed
+- Restore feral druid tank priority to prefer Blessing of Might before Blessing of Light, while still preferring Light before Wisdom.
+
+### Tests
+- Update tank druid priority coverage to lock in `Might > Light > Wisdom`.
+
 ## [0.1.36] - 2026-05-25
 
 ### Fixed
