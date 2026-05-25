@@ -5060,69 +5060,77 @@ function PPA:BuildOptionsTable()
 	}
 end
 
-function PPA:RegisterSettingsCanvasOptions(dialog)
+function PPA:RegisterNativeSettingsOptions()
 	local settings = _G.Settings
-	if type(dialog) ~= "table" or type(dialog.Open) ~= "function" then
-		return false
-	end
 	if type(settings) ~= "table"
-		or type(settings.RegisterCanvasLayoutCategory) ~= "function"
+		or type(settings.RegisterVerticalLayoutCategory) ~= "function"
+		or type(settings.RegisterProxySetting) ~= "function"
+		or type(settings.CreateCheckbox) ~= "function"
 		or type(settings.RegisterAddOnCategory) ~= "function"
-	then
-		return false
-	end
-	if type(_G.LibStub) ~= "function" then
-		return false
-	end
-
-	local okGUI, gui = pcall(_G.LibStub, "AceGUI-3.0", true)
-	if not okGUI or not gui or type(gui.Create) ~= "function" then
-		return false
-	end
-
-	local okGroup, group = pcall(gui.Create, gui, "BlizOptionsGroup")
-	if not okGroup or type(group) ~= "table" or not group.frame then
-		return false
-	end
-	if type(group.SetName) ~= "function"
-		or type(group.SetTitle) ~= "function"
-		or type(group.SetUserData) ~= "function"
-		or type(group.SetCallback) ~= "function"
-		or type(group.ReleaseChildren) ~= "function"
+		or type(settings.VarType) ~= "table"
+		or not settings.VarType.Boolean
 	then
 		return false
 	end
 
-	local okConfigure = pcall(function()
-		group:SetName("PallyPowerAdvanced")
-		group:SetTitle("PallyPowerAdvanced")
-		group:SetUserData("appName", "PallyPowerAdvanced")
-		group:SetCallback("OnShow", function(widget)
-			dialog:Open("PallyPowerAdvanced", widget)
-		end)
-		group:SetCallback("OnHide", function(widget)
-			widget:ReleaseChildren()
-		end)
-	end)
-	if not okConfigure then
-		return false
-	end
-
-	local okCategory, category = pcall(settings.RegisterCanvasLayoutCategory, group.frame, "PallyPowerAdvanced")
+	local okCategory, category = pcall(settings.RegisterVerticalLayoutCategory, "PallyPowerAdvanced")
 	if not okCategory or not category then
 		return false
 	end
+
+	local function registerCheckbox(variable, name, tooltip, getValue, setValue)
+		local okSetting, setting = pcall(
+			settings.RegisterProxySetting,
+			category,
+			variable,
+			settings.VarType.Boolean,
+			name,
+			false,
+			getValue,
+			setValue
+		)
+		if not okSetting or not setting then
+			return false
+		end
+		local okControl = pcall(settings.CreateCheckbox, category, setting, tooltip)
+		return okControl
+	end
+
+	if not registerCheckbox(
+		"PALLYPOWERADVANCED_ALWAYS_PREFER_WISDOM_ON_HEALERS",
+		"Always Prefer Wisdom on Healers",
+		"Prefer Blessing of Wisdom over Blessing of Kings for healer assignments even when Wisdom is not improved.",
+		function()
+			return PPA:EnsureDB().alwaysPreferWisdomOnHealers == true
+		end,
+		function(value)
+			PPA:EnsureDB().alwaysPreferWisdomOnHealers = value == true
+		end
+	) then
+		return false
+	end
+
+	if not registerCheckbox(
+		"PALLYPOWERADVANCED_ALWAYS_PREFER_WISDOM_ON_PALADIN_TANKS",
+		"Always Prefer Wisdom for Paladin Tanks",
+		"Prefer Blessing of Wisdom over Blessing of Kings for paladin tank assignments regardless of active spec data.",
+		function()
+			return PPA:EnsureDB().alwaysPreferWisdomOnPaladinTanks == true
+		end,
+		function(value)
+			PPA:EnsureDB().alwaysPreferWisdomOnPaladinTanks = value == true
+		end
+	) then
+		return false
+	end
+
 	local okRegister = pcall(settings.RegisterAddOnCategory, category)
 	if not okRegister then
 		return false
 	end
 
-	dialog.BlizOptions = dialog.BlizOptions or {}
-	dialog.BlizOptions.PallyPowerAdvanced = dialog.BlizOptions.PallyPowerAdvanced or {}
-	dialog.BlizOptions.PallyPowerAdvanced.PallyPowerAdvanced = group
-
-	self.optionsWidget = group
-	self.optionsFrame = group.frame
+	self.optionsWidget = nil
+	self.optionsFrame = nil
 	self.optionsCategory = category
 	return true
 end
@@ -5132,30 +5140,29 @@ function PPA:RegisterPallyPowerAdvancedOptions()
 	if self.optionsRegistered then
 		return true
 	end
-	if type(_G.LibStub) ~= "function" then
-		return false
-	end
-
-	local okConfig, config = pcall(_G.LibStub, "AceConfig-3.0", true)
-	local okDialog, dialog = pcall(_G.LibStub, "AceConfigDialog-3.0", true)
-	if not okConfig or not config or type(config.RegisterOptionsTable) ~= "function" then
-		return false
-	end
-	if not okDialog or not dialog or type(dialog.AddToBlizOptions) ~= "function" then
-		return false
-	end
-
 	self.options = self.options or self:BuildOptionsTable()
-	local okRegister = pcall(config.RegisterOptionsTable, config, "PallyPowerAdvanced", self.options, {"ppa", "pallypoweradvanced"})
-	if not okRegister then
-		return false
+
+	local aceOptionsRegistered = false
+	local dialog
+	if type(_G.LibStub) == "function" then
+		local okConfig, config = pcall(_G.LibStub, "AceConfig-3.0", true)
+		local okDialog, aceDialog = pcall(_G.LibStub, "AceConfigDialog-3.0", true)
+		if okConfig and config and type(config.RegisterOptionsTable) == "function" then
+			aceOptionsRegistered = pcall(config.RegisterOptionsTable, config, "PallyPowerAdvanced", self.options, {"ppa", "pallypoweradvanced"})
+		end
+		if okDialog and aceDialog and type(aceDialog.AddToBlizOptions) == "function" then
+			dialog = aceDialog
+		end
 	end
 
-	if self:RegisterSettingsCanvasOptions(dialog) then
+	if self:RegisterNativeSettingsOptions() then
 		self.optionsRegistered = true
 		return true
 	end
 
+	if not aceOptionsRegistered or not dialog then
+		return false
+	end
 	local okAdd, optionsFrame = pcall(dialog.AddToBlizOptions, dialog, "PallyPowerAdvanced", "PallyPowerAdvanced")
 	if not okAdd then
 		return false
