@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.1.38] - 2026-05-25
+
+### Fixed
+- Register the standalone `PallyPowerAdvanced` AddOns options category through the TBC Anniversary Settings API, with the legacy Ace options path retained as a fallback.
+- Disable `/ppa simulate` automatically when a party invite arrives, restoring the previous PallyPower state before the player joins the group.
+
+### Tests
+- Add coverage for the source-verified Settings API registration path.
+- Add coverage for restoring PallyPower state from active simulation mode on party invite.
+
 ## [0.1.37] - 2026-05-25
 
 ### Fixed

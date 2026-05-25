@@ -858,6 +858,8 @@ test("PPA registers its own AddOns options panel", function()
 		db = PPA.db,
 		options = PPA.options,
 		optionsFrame = PPA.optionsFrame,
+		optionsWidget = PPA.optionsWidget,
+		optionsCategory = PPA.optionsCategory,
 		optionsRegistered = PPA.optionsRegistered,
 	}
 	local registered
@@ -884,6 +886,8 @@ test("PPA registers its own AddOns options panel", function()
 	PPA.db = nil
 	PPA.options = nil
 	PPA.optionsFrame = nil
+	PPA.optionsWidget = nil
+	PPA.optionsCategory = nil
 	PPA.optionsRegistered = nil
 	_G.PallyPower = {
 		opt = {},
@@ -919,6 +923,122 @@ test("PPA registers its own AddOns options panel", function()
 	PPA.db = old.db
 	PPA.options = old.options
 	PPA.optionsFrame = old.optionsFrame
+	PPA.optionsWidget = old.optionsWidget
+	PPA.optionsCategory = old.optionsCategory
+	PPA.optionsRegistered = old.optionsRegistered
+end)
+
+test("PPA registers its AddOns panel through TBC Settings when available", function()
+	local old = {
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
+		LibStub = _G.LibStub,
+		Settings = _G.Settings,
+		db = PPA.db,
+		options = PPA.options,
+		optionsFrame = PPA.optionsFrame,
+		optionsWidget = PPA.optionsWidget,
+		optionsCategory = PPA.optionsCategory,
+		optionsRegistered = PPA.optionsRegistered,
+	}
+	local registered
+	local canvas
+	local addonCategory
+	local opened
+	local addToBlizCalled = false
+	local released = false
+
+	local dialog = {
+		AddToBlizOptions = function()
+			addToBlizCalled = true
+		end,
+		Open = function(_, appName, widget)
+			opened = {appName = appName, widget = widget}
+		end,
+	}
+	local callbacks = {}
+	local widget = {
+		frame = {},
+		SetName = function(self, name, parent)
+			self.frame.name = name
+			self.frame.parent = parent
+		end,
+		SetTitle = function(self, title)
+			self.frame.title = title
+		end,
+		SetUserData = function(self, key, value)
+			self.userData = self.userData or {}
+			self.userData[key] = value
+		end,
+		SetCallback = function(_, event, callback)
+			callbacks[event] = callback
+		end,
+		ReleaseChildren = function()
+			released = true
+		end,
+	}
+
+	_G.Settings = {
+		RegisterCanvasLayoutCategory = function(frame, name)
+			canvas = {frame = frame, name = name}
+			return "settings-category", "settings-layout"
+		end,
+		RegisterAddOnCategory = function(category)
+			addonCategory = category
+		end,
+	}
+	_G.LibStub = function(name)
+		if name == "AceConfig-3.0" then
+			return {
+				RegisterOptionsTable = function(_, appName, options, slash)
+					registered = {appName = appName, options = options, slash = slash}
+				end,
+			}
+		elseif name == "AceConfigDialog-3.0" then
+			return dialog
+		elseif name == "AceGUI-3.0" then
+			return {
+				Create = function(_, widgetType)
+					assertEquals(widgetType, "BlizOptionsGroup", "settings fallback should use Ace's Blizzard options widget")
+					return widget
+				end,
+			}
+		end
+		error("unexpected LibStub lookup: " .. tostring(name))
+	end
+
+	_G.PallyPowerAdvancedDB = {}
+	PPA.db = nil
+	PPA.options = nil
+	PPA.optionsFrame = nil
+	PPA.optionsWidget = nil
+	PPA.optionsCategory = nil
+	PPA.optionsRegistered = nil
+
+	assertEquals(T.RegisterPallyPowerAdvancedOptions(), true, "options should register with Settings")
+	assertEquals(registered.appName, "PallyPowerAdvanced", "AceConfig app name")
+	assertEquals(canvas.frame, widget.frame, "Settings should register the Ace canvas frame")
+	assertEquals(canvas.name, "PallyPowerAdvanced", "Settings category display name")
+	assertEquals(addonCategory, "settings-category", "Settings category should be added to AddOns")
+	assertEquals(addToBlizCalled, false, "modern Settings path should not use legacy InterfaceOptions")
+	assertEquals(PPA.optionsFrame, widget.frame, "options frame should be stored")
+	assertEquals(PPA.optionsWidget, widget, "options widget should be retained")
+	assertEquals(PPA.optionsCategory, "settings-category", "options category should be stored")
+	assertEquals(dialog.BlizOptions.PallyPowerAdvanced.PallyPowerAdvanced, widget, "Ace refresh table should include the widget")
+
+	callbacks.OnShow(widget)
+	assertEquals(opened.appName, "PallyPowerAdvanced", "Settings canvas should open the Ace options")
+	assertEquals(opened.widget, widget, "Settings canvas should open into its widget")
+	callbacks.OnHide(widget)
+	assertEquals(released, true, "Settings canvas should release children when hidden")
+
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
+	_G.LibStub = old.LibStub
+	_G.Settings = old.Settings
+	PPA.db = old.db
+	PPA.options = old.options
+	PPA.optionsFrame = old.optionsFrame
+	PPA.optionsWidget = old.optionsWidget
+	PPA.optionsCategory = old.optionsCategory
 	PPA.optionsRegistered = old.optionsRegistered
 end)
 
@@ -2269,6 +2389,102 @@ test("simulation PallyPower hooks do not replace live unit APIs", function()
 	PPA.simulationHooksInstalledFor = old.simulationHooksInstalledFor
 	_G.IsInRaid = old.IsInRaid
 	_G.GetRaidRosterInfo = old.GetRaidRosterInfo
+end)
+
+test("party invite disables active simulation and restores PallyPower state", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPowerAdvancedDB = _G.PallyPowerAdvancedDB,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_AuraAssignments = _G.PallyPower_AuraAssignments,
+		AllPallys = _G.AllPallys,
+		SyncList = _G.SyncList,
+		PP_Leader = _G.PP_Leader,
+		DEFAULT_CHAT_FRAME = _G.DEFAULT_CHAT_FRAME,
+		db = PPA.db,
+		simulation = PPA.simulation,
+	}
+	local messages = {}
+	local scanSpells = 0
+	local scanCooldowns = 0
+	local scanInventory = 0
+	local updateRoster = 0
+
+	_G.PallyPowerAdvancedDB = {simulationActive = true}
+	PPA.db = _G.PallyPowerAdvancedDB
+	_G.DEFAULT_CHAT_FRAME = {
+		AddMessage = function(_, message)
+			messages[#messages + 1] = message
+		end,
+	}
+	_G.PallyPower_Assignments = {Liveholy = {[1] = T.BUFF_KINGS}}
+	_G.PallyPower_NormalAssignments = {Liveholy = {[1] = {Tank = T.BUFF_LIGHT}}}
+	_G.PallyPower_AuraAssignments = {Liveholy = T.AURA_DEVOTION}
+	_G.AllPallys = {Liveholy = {symbols = 10}}
+	_G.SyncList = {"Liveholy"}
+	_G.PP_Leader = false
+	_G.PallyPower = {
+		player = "PpaSimHoly",
+		opt = {freeassign = true},
+		ScanSpells = function()
+			scanSpells = scanSpells + 1
+		end,
+		ScanCooldowns = function()
+			scanCooldowns = scanCooldowns + 1
+		end,
+		ScanInventory = function()
+			scanInventory = scanInventory + 1
+		end,
+		UpdateRoster = function()
+			updateRoster = updateRoster + 1
+		end,
+	}
+	PPA.simulation = {
+		active = true,
+		context = {players = {}},
+		previous = {
+			PallyPower_Assignments = {Liveholy = {[1] = T.BUFF_KINGS}},
+			PallyPower_NormalAssignments = {Liveholy = {[1] = {Tank = T.BUFF_LIGHT}}},
+			PallyPower_AuraAssignments = {Liveholy = T.AURA_DEVOTION},
+			AllPallys = {Liveholy = {symbols = 10}},
+			SyncList = {"Liveholy"},
+			PP_Leader = false,
+			player = "Liveholy",
+			freeassign = false,
+		},
+	}
+
+	PPA:OnEvent("PARTY_INVITE_REQUEST", "Leadadin")
+
+	assertEquals(PPA.simulation, nil, "party invite should clear active simulation")
+	assertEquals(_G.PallyPower.player, "Liveholy", "stored player name should be restored")
+	assertEquals(_G.PallyPower.opt.freeassign, false, "stored free assignment state should be restored")
+	assertEquals(_G.PallyPower_Assignments.Liveholy[1], T.BUFF_KINGS, "greater assignments should be restored")
+	assertEquals(_G.PallyPower_NormalAssignments.Liveholy[1].Tank, T.BUFF_LIGHT, "normal assignments should be restored")
+	assertEquals(_G.PallyPower_AuraAssignments.Liveholy, T.AURA_DEVOTION, "aura assignments should be restored")
+	assertEquals(_G.PallyPowerAdvancedDB.simulationActive, nil, "simulation saved state marker should be cleared")
+	assertEquals(scanSpells, 1, "PallyPower spells should refresh after restore")
+	assertEquals(scanCooldowns, 1, "PallyPower cooldowns should refresh after restore")
+	assertEquals(scanInventory, 1, "PallyPower inventory should refresh after restore")
+	assertEquals(updateRoster, 1, "PallyPower roster should refresh after restore")
+	assertEquals(
+		messages[#messages],
+		"|cff33ff99PPA|r: PPA simulation disabled because you were invited to a group; previous PallyPower state restored.",
+		"party invite restore message"
+	)
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPowerAdvancedDB = old.PallyPowerAdvancedDB
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_AuraAssignments = old.PallyPower_AuraAssignments
+	_G.AllPallys = old.AllPallys
+	_G.SyncList = old.SyncList
+	_G.PP_Leader = old.PP_Leader
+	_G.DEFAULT_CHAT_FRAME = old.DEFAULT_CHAT_FRAME
+	PPA.db = old.db
+	PPA.simulation = old.simulation
 end)
 
 test("simulation assignment grid renders individual class members", function()
