@@ -592,7 +592,7 @@ function PPA:GetBasePriorityForUnit(unit, context)
 	local spec = unit.spec
 
 	if UnitIsKnownPet(unit) then
-		return BuildPriority(includeLight, BUFF_KINGS, BUFF_MIGHT, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
+		return BuildPriority(includeLight, BUFF_MIGHT, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 	end
 
 	if class == "WARRIOR" then
