@@ -4882,6 +4882,39 @@ function PPA:ReflowButtons()
 	end
 end
 
+function PPA:RefreshPallyPowerStandaloneOptions()
+	local frame = _G.PallyPowerConfigFrame
+	if not frame or type(frame.obj) ~= "table" then
+		return false
+	end
+	if type(_G.LibStub) ~= "function" then
+		return false
+	end
+
+	local ok, dialog = pcall(_G.LibStub, "AceConfigDialog-3.0", true)
+	if not ok or not dialog or type(dialog.Open) ~= "function" then
+		return false
+	end
+
+	local wasShown = type(frame.IsShown) == "function" and frame:IsShown()
+	if type(dialog.SetDefaultSize) == "function" then
+		pcall(dialog.SetDefaultSize, dialog, "PallyPower", 625, 580)
+	end
+	local opened = pcall(dialog.Open, dialog, "PallyPower", frame.obj)
+	if not opened then
+		return false
+	end
+
+	if not wasShown then
+		if type(frame.obj.Hide) == "function" then
+			pcall(frame.obj.Hide, frame.obj)
+		elseif type(frame.Hide) == "function" then
+			pcall(frame.Hide, frame)
+		end
+	end
+	return true
+end
+
 function PPA:EnsurePallyPowerAdvancedOptions()
 	local pallyPower = _G.PallyPower
 	if not pallyPower or type(pallyPower.options) ~= "table" or type(pallyPower.options.args) ~= "table" then
@@ -4961,6 +4994,7 @@ function PPA:EnsurePallyPowerAdvancedOptions()
 			registry:NotifyChange("PallyPower")
 		end
 	end
+	self:RefreshPallyPowerStandaloneOptions()
 	return true
 end
 
@@ -4981,6 +5015,14 @@ function PPA:HookPallyPower()
 		_G.hooksecurefunc(_G.PallyPower, "UpdateLayout", function()
 			PPA:CreateSmartButton()
 			PPA:ReflowButtons()
+		end)
+	end
+	if type(_G.hooksecurefunc) == "function" and _G.PallyPower.OpenConfigWindow then
+		_G.hooksecurefunc(_G.PallyPower, "OpenConfigWindow", function()
+			local frame = _G.PallyPowerConfigFrame
+			if not frame or type(frame.IsShown) ~= "function" or frame:IsShown() then
+				PPA:EnsurePallyPowerAdvancedOptions()
+			end
 		end)
 	end
 	self:CreateSmartButton()
@@ -5201,6 +5243,9 @@ PPA._test = {
 	end,
 	EnsurePallyPowerAdvancedOptions = function()
 		return PPA:EnsurePallyPowerAdvancedOptions()
+	end,
+	RefreshPallyPowerStandaloneOptions = function()
+		return PPA:RefreshPallyPowerStandaloneOptions()
 	end,
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)

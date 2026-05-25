@@ -826,6 +826,7 @@ test("PPA injects the Advanced tab into PallyPower options", function()
 	local old = {
 		PallyPower = _G.PallyPower,
 		LibStub = _G.LibStub,
+		PallyPowerConfigFrame = _G.PallyPowerConfigFrame,
 	}
 	local notified
 
@@ -841,6 +842,7 @@ test("PPA injects the Advanced tab into PallyPower options", function()
 		opt = {},
 		options = {args = {}},
 	}
+	_G.PallyPowerConfigFrame = nil
 
 	assertEquals(T.EnsurePallyPowerAdvancedOptions(), true, "options should be injected")
 	local advanced = _G.PallyPower.options.args.advanced
@@ -860,6 +862,67 @@ test("PPA injects the Advanced tab into PallyPower options", function()
 
 	_G.PallyPower = old.PallyPower
 	_G.LibStub = old.LibStub
+	_G.PallyPowerConfigFrame = old.PallyPowerConfigFrame
+end)
+
+test("PPA refreshes the standalone PallyPower config frame after injecting options", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		LibStub = _G.LibStub,
+		PallyPowerConfigFrame = _G.PallyPowerConfigFrame,
+	}
+	local notified
+	local defaulted
+	local opened
+	local hidden
+	local standaloneContainer = {
+		Hide = function()
+			hidden = true
+		end,
+	}
+
+	_G.LibStub = function(name)
+		if name == "AceConfigRegistry-3.0" then
+			return {
+				NotifyChange = function(_, appName)
+					notified = appName
+				end,
+			}
+		elseif name == "AceConfigDialog-3.0" then
+			return {
+				SetDefaultSize = function(_, appName, width, height)
+					defaulted = {appName = appName, width = width, height = height}
+				end,
+				Open = function(_, appName, container)
+					opened = {appName = appName, container = container}
+				end,
+			}
+		end
+		error("unexpected LibStub lookup: " .. tostring(name))
+	end
+	_G.PallyPower = {
+		opt = {},
+		options = {args = {}},
+	}
+	_G.PallyPowerConfigFrame = {
+		obj = standaloneContainer,
+		IsShown = function()
+			return false
+		end,
+	}
+
+	assertEquals(T.EnsurePallyPowerAdvancedOptions(), true, "options should be injected")
+	assertEquals(notified, "PallyPower", "AceConfig should be notified")
+	assertEquals(defaulted.appName, "PallyPower", "standalone app default size app")
+	assertEquals(defaulted.width, 625, "standalone width")
+	assertEquals(defaulted.height, 580, "standalone height")
+	assertEquals(opened.appName, "PallyPower", "standalone config app")
+	assertEquals(opened.container, standaloneContainer, "standalone AceGUI container")
+	assertEquals(hidden, true, "hidden standalone frame should stay hidden after refresh")
+
+	_G.PallyPower = old.PallyPower
+	_G.LibStub = old.LibStub
+	_G.PallyPowerConfigFrame = old.PallyPowerConfigFrame
 end)
 
 test("aura assignment gives improved devotion paladin devo first", function()
