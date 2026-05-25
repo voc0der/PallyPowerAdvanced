@@ -865,27 +865,54 @@ test("PPA injects the Advanced tab into PallyPower options", function()
 	_G.PallyPowerConfigFrame = old.PallyPowerConfigFrame
 end)
 
-test("PPA refreshes the standalone PallyPower config frame after injecting options", function()
+test("PPA rebuilds the standalone PallyPower config frame after injecting options", function()
 	local old = {
 		PallyPower = _G.PallyPower,
 		LibStub = _G.LibStub,
 		PallyPowerConfigFrame = _G.PallyPowerConfigFrame,
+		UISpecialFrames = _G.UISpecialFrames,
+		standaloneFrame = PPA.pallyPowerStandaloneFrame,
+		standaloneReady = PPA.pallyPowerStandaloneOptionsReady,
 	}
 	local notified
 	local defaulted
+	local created
 	local opened
-	local hidden
-	local standaloneContainer = {
+	local resized
+	local oldHidden
+	local newHidden
+	local oldFrame = {
 		Hide = function()
-			hidden = true
+			oldHidden = true
+		end,
+		IsShown = function()
+			return false
 		end,
 	}
+	local newFrame = {}
+	local standaloneContainer = {
+		frame = newFrame,
+		EnableResize = function(_, value)
+			resized = value
+		end,
+		Hide = function()
+			newHidden = true
+		end,
+	}
+	newFrame.obj = standaloneContainer
 
 	_G.LibStub = function(name)
 		if name == "AceConfigRegistry-3.0" then
 			return {
 				NotifyChange = function(_, appName)
 					notified = appName
+				end,
+			}
+		elseif name == "AceGUI-3.0" then
+			return {
+				Create = function(_, widgetType)
+					created = widgetType
+					return standaloneContainer
 				end,
 			}
 		elseif name == "AceConfigDialog-3.0" then
@@ -904,25 +931,66 @@ test("PPA refreshes the standalone PallyPower config frame after injecting optio
 		opt = {},
 		options = {args = {}},
 	}
-	_G.PallyPowerConfigFrame = {
-		obj = standaloneContainer,
-		IsShown = function()
-			return false
-		end,
-	}
+	_G.PallyPowerConfigFrame = oldFrame
+	_G.UISpecialFrames = {}
+	PPA.pallyPowerStandaloneFrame = nil
+	PPA.pallyPowerStandaloneOptionsReady = nil
 
 	assertEquals(T.EnsurePallyPowerAdvancedOptions(), true, "options should be injected")
 	assertEquals(notified, "PallyPower", "AceConfig should be notified")
+	assertEquals(oldHidden, true, "stale standalone frame should be hidden")
+	assertEquals(created, "Frame", "standalone frame should be recreated")
+	assertEquals(resized, false, "standalone frame resize should be disabled")
 	assertEquals(defaulted.appName, "PallyPower", "standalone app default size app")
 	assertEquals(defaulted.width, 625, "standalone width")
 	assertEquals(defaulted.height, 580, "standalone height")
 	assertEquals(opened.appName, "PallyPower", "standalone config app")
 	assertEquals(opened.container, standaloneContainer, "standalone AceGUI container")
-	assertEquals(hidden, true, "hidden standalone frame should stay hidden after refresh")
+	assertEquals(_G.PallyPowerConfigFrame, newFrame, "global standalone frame should be replaced")
+	assertEquals(_G.UISpecialFrames[1], "PallyPowerConfigFrame", "standalone frame should stay an escape-close frame")
+	assertEquals(newHidden, true, "hidden standalone frame should stay hidden after rebuild")
 
 	_G.PallyPower = old.PallyPower
 	_G.LibStub = old.LibStub
 	_G.PallyPowerConfigFrame = old.PallyPowerConfigFrame
+	_G.UISpecialFrames = old.UISpecialFrames
+	PPA.pallyPowerStandaloneFrame = old.standaloneFrame
+	PPA.pallyPowerStandaloneOptionsReady = old.standaloneReady
+end)
+
+test("PPA wraps the PallyPower config button path before the frame toggles", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		LibStub = _G.LibStub,
+		configHooked = PPA.pallyPowerConfigWindowHooked,
+	}
+	local openedWithAdvanced
+
+	_G.LibStub = function(name)
+		if name == "AceConfigRegistry-3.0" then
+			return {
+				NotifyChange = function()
+				end,
+			}
+		end
+		return nil
+	end
+	_G.PallyPower = {
+		opt = {},
+		options = {args = {}},
+		OpenConfigWindow = function(self)
+			openedWithAdvanced = self.options.args.advanced ~= nil
+		end,
+	}
+	PPA.pallyPowerConfigWindowHooked = nil
+
+	assertEquals(T.InstallPallyPowerConfigWindowHook(), true, "config window hook should install")
+	_G.PallyPower:OpenConfigWindow()
+	assertEquals(openedWithAdvanced, true, "advanced options should be injected before original open")
+
+	_G.PallyPower = old.PallyPower
+	_G.LibStub = old.LibStub
+	PPA.pallyPowerConfigWindowHooked = old.configHooked
 end)
 
 test("aura assignment gives improved devotion paladin devo first", function()

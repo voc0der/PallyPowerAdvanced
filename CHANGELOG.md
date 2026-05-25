@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.1.34] - 2026-05-25
+
+### Fixed
+- Rebuild PallyPower Classic's standalone options frame after injecting PallyPowerAdvanced settings so the `Advanced` tab appears from the in-addon settings button.
+- Wrap the PallyPower Classic settings button path before the frame toggles so stale standalone frames are replaced before they are shown.
+
+### Tests
+- Add coverage for replacing the stale standalone config frame and for injecting options before PallyPower's settings button opens it.
+
 ## [0.1.33] - 2026-05-25
 
 ### Fixed
