@@ -4234,7 +4234,7 @@ function PPA:ActivateSimulation(seed)
 	return true
 end
 
-function PPA:DeactivateSimulation()
+function PPA:DeactivateSimulation(reason)
 	if not self:IsSimulationActive() then
 		local restored = self:RestorePallyPowerState()
 		Print(restored and "Simulation state restored." or "No PPA simulation is active.")
@@ -4260,8 +4260,20 @@ function PPA:DeactivateSimulation()
 			pcall(_G.PallyPower.UpdateLayout, _G.PallyPower)
 		end
 	end
-	Print(restored and "PPA simulation disabled and previous PallyPower state restored." or "PPA simulation disabled.")
+	local message = restored and "PPA simulation disabled and previous PallyPower state restored." or "PPA simulation disabled."
+	if reason then
+		message = restored and ("PPA simulation disabled because " .. reason .. "; previous PallyPower state restored.")
+			or ("PPA simulation disabled because " .. reason .. ".")
+	end
+	Print(message)
 	return true
+end
+
+function PPA:DisableSimulationForGroupInvite()
+	if not self:IsSimulationActive() then
+		return false
+	end
+	return self:DeactivateSimulation("you were invited to a group")
 end
 
 function PPA:AssignmentString(assignments)
@@ -5048,6 +5060,73 @@ function PPA:BuildOptionsTable()
 	}
 end
 
+function PPA:RegisterSettingsCanvasOptions(dialog)
+	local settings = _G.Settings
+	if type(dialog) ~= "table" or type(dialog.Open) ~= "function" then
+		return false
+	end
+	if type(settings) ~= "table"
+		or type(settings.RegisterCanvasLayoutCategory) ~= "function"
+		or type(settings.RegisterAddOnCategory) ~= "function"
+	then
+		return false
+	end
+	if type(_G.LibStub) ~= "function" then
+		return false
+	end
+
+	local okGUI, gui = pcall(_G.LibStub, "AceGUI-3.0", true)
+	if not okGUI or not gui or type(gui.Create) ~= "function" then
+		return false
+	end
+
+	local okGroup, group = pcall(gui.Create, gui, "BlizOptionsGroup")
+	if not okGroup or type(group) ~= "table" or not group.frame then
+		return false
+	end
+	if type(group.SetName) ~= "function"
+		or type(group.SetTitle) ~= "function"
+		or type(group.SetUserData) ~= "function"
+		or type(group.SetCallback) ~= "function"
+		or type(group.ReleaseChildren) ~= "function"
+	then
+		return false
+	end
+
+	local okConfigure = pcall(function()
+		group:SetName("PallyPowerAdvanced")
+		group:SetTitle("PallyPowerAdvanced")
+		group:SetUserData("appName", "PallyPowerAdvanced")
+		group:SetCallback("OnShow", function(widget)
+			dialog:Open("PallyPowerAdvanced", widget)
+		end)
+		group:SetCallback("OnHide", function(widget)
+			widget:ReleaseChildren()
+		end)
+	end)
+	if not okConfigure then
+		return false
+	end
+
+	local okCategory, category = pcall(settings.RegisterCanvasLayoutCategory, group.frame, "PallyPowerAdvanced")
+	if not okCategory or not category then
+		return false
+	end
+	local okRegister = pcall(settings.RegisterAddOnCategory, category)
+	if not okRegister then
+		return false
+	end
+
+	dialog.BlizOptions = dialog.BlizOptions or {}
+	dialog.BlizOptions.PallyPowerAdvanced = dialog.BlizOptions.PallyPowerAdvanced or {}
+	dialog.BlizOptions.PallyPowerAdvanced.PallyPowerAdvanced = group
+
+	self.optionsWidget = group
+	self.optionsFrame = group.frame
+	self.optionsCategory = category
+	return true
+end
+
 function PPA:RegisterPallyPowerAdvancedOptions()
 	self:EnsureDB()
 	if self.optionsRegistered then
@@ -5071,6 +5150,12 @@ function PPA:RegisterPallyPowerAdvancedOptions()
 	if not okRegister then
 		return false
 	end
+
+	if self:RegisterSettingsCanvasOptions(dialog) then
+		self.optionsRegistered = true
+		return true
+	end
+
 	local okAdd, optionsFrame = pcall(dialog.AddToBlizOptions, dialog, "PallyPowerAdvanced", "PallyPowerAdvanced")
 	if not okAdd then
 		return false
@@ -5199,6 +5284,8 @@ function PPA:OnEvent(event, arg1, arg2, arg3, arg4)
 		self:BroadcastSpec()
 	elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" or event == "SPELLS_CHANGED" then
 		self:HandleLocalTalentChanged()
+	elseif event == "PARTY_INVITE_REQUEST" then
+		self:DisableSimulationForGroupInvite()
 	elseif event == "CHAT_MSG_ADDON" then
 		self:HandleAddonMessage(arg1, arg2, arg3, arg4)
 	end
@@ -5218,6 +5305,7 @@ function PPA:Initialize()
 		eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 		eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 		eventFrame:RegisterEvent("SPELLS_CHANGED")
+		eventFrame:RegisterEvent("PARTY_INVITE_REQUEST")
 		eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 		eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 			PPA:OnEvent(event, arg1, arg2, arg3, arg4)
@@ -5293,6 +5381,9 @@ PPA._test = {
 	end,
 	DeactivateSimulation = function()
 		return PPA:DeactivateSimulation()
+	end,
+	DisableSimulationForGroupInvite = function()
+		return PPA:DisableSimulationForGroupInvite()
 	end,
 	IsSimulationActive = function()
 		return PPA:IsSimulationActive()
