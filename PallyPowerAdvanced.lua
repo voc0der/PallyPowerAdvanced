@@ -4882,37 +4882,82 @@ function PPA:ReflowButtons()
 	end
 end
 
-function PPA:RefreshPallyPowerStandaloneOptions()
-	local frame = _G.PallyPowerConfigFrame
-	if not frame or type(frame.obj) ~= "table" then
+local function EnsureSpecialFrameName(frameName)
+	if type(_G.UISpecialFrames) ~= "table" then
+		return
+	end
+	for _, existing in ipairs(_G.UISpecialFrames) do
+		if existing == frameName then
+			return
+		end
+	end
+	table.insert(_G.UISpecialFrames, frameName)
+end
+
+local function HidePallyPowerConfigFrame(frame)
+	if not frame then
+		return
+	end
+	if type(frame.obj) == "table" and type(frame.obj.Hide) == "function" then
+		pcall(frame.obj.Hide, frame.obj)
+	elseif type(frame.Hide) == "function" then
+		pcall(frame.Hide, frame)
+	end
+end
+
+function PPA:RebuildPallyPowerStandaloneOptions()
+	if self.pallyPowerStandaloneOptionsReady and self.pallyPowerStandaloneFrame == _G.PallyPowerConfigFrame then
+		return true
+	end
+	local oldFrame = _G.PallyPowerConfigFrame
+	if not oldFrame then
 		return false
 	end
 	if type(_G.LibStub) ~= "function" then
 		return false
 	end
 
-	local ok, dialog = pcall(_G.LibStub, "AceConfigDialog-3.0", true)
-	if not ok or not dialog or type(dialog.Open) ~= "function" then
+	local okGui, aceGui = pcall(_G.LibStub, "AceGUI-3.0", true)
+	local okDialog, dialog = pcall(_G.LibStub, "AceConfigDialog-3.0", true)
+	if not okGui or not aceGui or type(aceGui.Create) ~= "function" then
+		return false
+	end
+	if not okDialog or not dialog or type(dialog.Open) ~= "function" then
 		return false
 	end
 
-	local wasShown = type(frame.IsShown) == "function" and frame:IsShown()
+	local wasShown = oldFrame and type(oldFrame.IsShown) == "function" and oldFrame:IsShown()
+	HidePallyPowerConfigFrame(oldFrame)
+
+	local okCreate, configFrame = pcall(aceGui.Create, aceGui, "Frame")
+	if not okCreate or type(configFrame) ~= "table" or not configFrame.frame then
+		return false
+	end
+	if type(configFrame.EnableResize) == "function" then
+		pcall(configFrame.EnableResize, configFrame, false)
+	end
 	if type(dialog.SetDefaultSize) == "function" then
 		pcall(dialog.SetDefaultSize, dialog, "PallyPower", 625, 580)
 	end
-	local opened = pcall(dialog.Open, dialog, "PallyPower", frame.obj)
+	local opened = pcall(dialog.Open, dialog, "PallyPower", configFrame)
 	if not opened then
+		HidePallyPowerConfigFrame(configFrame.frame)
 		return false
 	end
 
+	_G.PallyPowerConfigFrame = configFrame.frame
+	EnsureSpecialFrameName("PallyPowerConfigFrame")
+	self.pallyPowerStandaloneFrame = configFrame.frame
+	self.pallyPowerStandaloneOptionsReady = true
+
 	if not wasShown then
-		if type(frame.obj.Hide) == "function" then
-			pcall(frame.obj.Hide, frame.obj)
-		elseif type(frame.Hide) == "function" then
-			pcall(frame.Hide, frame)
-		end
+		HidePallyPowerConfigFrame(configFrame.frame)
 	end
 	return true
+end
+
+function PPA:RefreshPallyPowerStandaloneOptions()
+	return self:RebuildPallyPowerStandaloneOptions()
 end
 
 function PPA:EnsurePallyPowerAdvancedOptions()
@@ -4998,11 +5043,26 @@ function PPA:EnsurePallyPowerAdvancedOptions()
 	return true
 end
 
+function PPA:InstallPallyPowerConfigWindowHook()
+	local pallyPower = _G.PallyPower
+	if self.pallyPowerConfigWindowHooked or type(pallyPower) ~= "table" or type(pallyPower.OpenConfigWindow) ~= "function" then
+		return false
+	end
+	local originalOpenConfigWindow = pallyPower.OpenConfigWindow
+	pallyPower.OpenConfigWindow = function(self, ...)
+		PPA:EnsurePallyPowerAdvancedOptions()
+		return originalOpenConfigWindow(self, ...)
+	end
+	self.pallyPowerConfigWindowHooked = true
+	return true
+end
+
 function PPA:HookPallyPower()
 	if not _G.PallyPower then
 		return
 	end
 	self:EnsurePallyPowerAdvancedOptions()
+	self:InstallPallyPowerConfigWindowHook()
 	self:HookAssignmentAlerts()
 	self:InstallSimulationHooks()
 	self:InstallAssignmentActionHooks()
@@ -5015,14 +5075,6 @@ function PPA:HookPallyPower()
 		_G.hooksecurefunc(_G.PallyPower, "UpdateLayout", function()
 			PPA:CreateSmartButton()
 			PPA:ReflowButtons()
-		end)
-	end
-	if type(_G.hooksecurefunc) == "function" and _G.PallyPower.OpenConfigWindow then
-		_G.hooksecurefunc(_G.PallyPower, "OpenConfigWindow", function()
-			local frame = _G.PallyPowerConfigFrame
-			if not frame or type(frame.IsShown) ~= "function" or frame:IsShown() then
-				PPA:EnsurePallyPowerAdvancedOptions()
-			end
 		end)
 	end
 	self:CreateSmartButton()
@@ -5246,6 +5298,12 @@ PPA._test = {
 	end,
 	RefreshPallyPowerStandaloneOptions = function()
 		return PPA:RefreshPallyPowerStandaloneOptions()
+	end,
+	RebuildPallyPowerStandaloneOptions = function()
+		return PPA:RebuildPallyPowerStandaloneOptions()
+	end,
+	InstallPallyPowerConfigWindowHook = function()
+		return PPA:InstallPallyPowerConfigWindowHook()
 	end,
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)
