@@ -169,7 +169,7 @@ test("warrior tank gets light over might when a holy paladin is present", functi
 	assertEquals(plan.normalAssignments.Retadin[1].Slammer, nil, "DPS warriors should keep class-wide might")
 end)
 
-test("druid tank ranks might above light above wisdom when a holy paladin is present", function()
+test("druid tank ranks might above light above wisdom only when a holy paladin is present", function()
 	local context = {pallyCount = 3, healingPaladinPresent = true, improvedWisdomPaladinPresent = true}
 	local tank = {name = "Bearwall", class = "DRUID", classID = 4, role = "TANK", spec = "FERAL_TANK"}
 
@@ -179,6 +179,16 @@ test("druid tank ranks might above light above wisdom when a holy paladin is pre
 	assertEquals(priority[3], T.BUFF_MIGHT, "druid tank should prefer might before light")
 	assertEquals(priority[4], T.BUFF_LIGHT, "druid tank should prefer light before wisdom")
 	assertEquals(priority[5], T.BUFF_WISDOM, "druid tank should put wisdom last")
+
+	context.healingPaladinPresent = false
+	priority = T.GetPriorityForUnit(tank, context)
+	assertEquals(priority[1], T.BUFF_KINGS, "druid tank no holy first priority")
+	assertEquals(priority[2], T.BUFF_SANCTUARY, "druid tank no holy second priority")
+	assertEquals(priority[3], T.BUFF_MIGHT, "druid tank no holy should still prefer might")
+	assertEquals(priority[4], T.BUFF_WISDOM, "druid tank no holy should skip light and prefer wisdom next")
+	for _, buff in ipairs(priority) do
+		assertEquals(buff == T.BUFF_LIGHT, false, "druid tank should not include light without a holy paladin")
+	end
 end)
 
 test("pvp priority removes salvation and pushes sanctuary last", function()
