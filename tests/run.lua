@@ -351,22 +351,22 @@ test("hunters prefer wisdom over light for damage", function()
 	assertEquals(buffs[T.BUFF_LIGHT], nil, "hunters should not receive light before wisdom")
 end)
 
-test("known pets prefer kings and might before salvation", function()
+test("known pets prefer might and kings before salvation", function()
 	local hunterPet = {name = "Bitey", class = "HUNTER", classID = 6, role = "DAMAGER", unit = "raidpet6", isPet = true}
 	local felguard = {name = "Felguard", class = "WARLOCK", classID = 8, role = "DAMAGER", unit = "raidpet8", isPet = true}
 
 	local hunterPriority = T.GetPriorityForUnit(hunterPet, {healingPaladinPresent = true})
-	assertEquals(hunterPriority[1], T.BUFF_KINGS, "hunter pet first priority")
-	assertEquals(hunterPriority[2], T.BUFF_MIGHT, "hunter pet second priority")
-	assertEquals(hunterPriority[3], T.BUFF_SALVATION, "hunter pet salvation after kings and might")
+	assertEquals(hunterPriority[1], T.BUFF_MIGHT, "hunter pet first priority")
+	assertEquals(hunterPriority[2], T.BUFF_KINGS, "hunter pet second priority")
+	assertEquals(hunterPriority[3], T.BUFF_SALVATION, "hunter pet salvation after might and kings")
 
 	local felguardPriority = T.GetPriorityForUnit(felguard, {healingPaladinPresent = true})
-	assertEquals(felguardPriority[1], T.BUFF_KINGS, "felguard first priority")
-	assertEquals(felguardPriority[2], T.BUFF_MIGHT, "felguard second priority")
-	assertEquals(felguardPriority[3], T.BUFF_SALVATION, "felguard salvation after kings and might")
+	assertEquals(felguardPriority[1], T.BUFF_MIGHT, "felguard first priority")
+	assertEquals(felguardPriority[2], T.BUFF_KINGS, "felguard second priority")
+	assertEquals(felguardPriority[3], T.BUFF_SALVATION, "felguard salvation after might and kings")
 end)
 
-test("known pets receive might override before class salvation", function()
+test("known pets receive kings override when might is already class-wide", function()
 	local context = {
 		playerName = "Holyone",
 		pallyCount = 2,
@@ -382,7 +382,9 @@ test("known pets receive might override before class salvation", function()
 	}
 
 	local plan = T.BuildSmartPlan(context)
-	assertEquals(findNormalBuff(plan, 6, "Bitey"), T.BUFF_MIGHT, "pet should get might instead of class salvation")
+	local buffs = collectClassBuffs(plan, 6)
+	assertEquals(buffs[T.BUFF_MIGHT], true, "pet should already have class-wide might")
+	assertEquals(findNormalBuff(plan, 6, "Bitey"), T.BUFF_KINGS, "pet should get kings instead of class salvation once might is provided")
 end)
 
 test("felguard pets receive might override before warlock class salvation", function()

@@ -1,9 +1,9 @@
 ## [Unreleased]
 
-## [0.1.31] - 2026-05-25
+## [0.1.32] - 2026-05-25
 
 ### Changed
-- Known pets now prefer Blessing of Kings and Blessing of Might before Blessing of Salvation, with single-target overrides when their owner class still needs class-wide Salvation.
+- Known pets now prefer Blessing of Might and Blessing of Kings before Blessing of Salvation, with single-target overrides when their owner class still needs class-wide Salvation.
 - PallyPowerAdvanced now injects an `Advanced` tab into PallyPower Classic with `PallyPowerAdvanced Settings` and Wisdom preference options for healers and paladin tanks.
 - Healer and paladin tank Wisdom priority can now follow those injected options independently.
 
