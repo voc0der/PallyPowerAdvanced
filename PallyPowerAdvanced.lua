@@ -1418,16 +1418,6 @@ function PPA:SimplifyGreaterAssignmentWorkloads(context, plan)
 	end
 end
 
-function PPA:FindReplacementBuff(paladin, priority, provided, currentBuff)
-	local currentIndex = PriorityIndex(priority, currentBuff) or 999
-	for index, buff in ipairs(priority) do
-		if index < currentIndex and not provided[buff] and self:CanPaladinBuff(paladin, buff) then
-			return buff, index
-		end
-	end
-	return nil
-end
-
 local function PlanHasNormalBuff(plan, classID, targetName, buff)
 	for _, classMap in pairs(plan.normalAssignments or {}) do
 		local targets = classMap and classMap[classID]
@@ -1609,29 +1599,72 @@ function PPA:ApplyTankLightFallbacks(context, classID, members, plan)
 	end
 end
 
+function PPA:FindBestReplacementAssignment(priority, buff, buffIndex, selected, usedAssignments)
+	local bestCandidate
+	for _, assignment in ipairs(selected or {}) do
+		if not usedAssignments[assignment] then
+			local priorityIndex = PriorityIndex(priority, assignment.buff)
+			local currentIndex = priorityIndex or 999
+			if buffIndex < currentIndex and self:CanPaladinBuff(assignment.paladin, buff) then
+				local candidate = {
+					assignment = assignment,
+					currentKnown = priorityIndex ~= nil,
+					currentIndex = currentIndex,
+					score = self:ScorePaladinForBuff(assignment.paladin, buff),
+				}
+				if not bestCandidate
+					or (candidate.currentKnown ~= bestCandidate.currentKnown and candidate.currentKnown)
+					or (
+						candidate.currentKnown == bestCandidate.currentKnown
+						and candidate.currentIndex > bestCandidate.currentIndex
+					)
+					or (
+						candidate.currentKnown == bestCandidate.currentKnown
+						and candidate.currentIndex == bestCandidate.currentIndex
+						and candidate.score > bestCandidate.score
+					)
+					or (
+						candidate.currentKnown == bestCandidate.currentKnown
+						and candidate.currentIndex == bestCandidate.currentIndex
+						and candidate.score == bestCandidate.score
+						and candidate.assignment.paladin.name < bestCandidate.assignment.paladin.name
+					)
+				then
+					bestCandidate = candidate
+				end
+			end
+		end
+	end
+	return bestCandidate and bestCandidate.assignment or nil
+end
+
 function PPA:ApplyPlayerOverrides(context, classID, members, selected, plan)
 	for _, unit in ipairs(members) do
 		local priority = unit.priority or self:GetPriorityForUnit(unit, context)
 		local provided = {}
 		for _, assignment in ipairs(selected) do
-			provided[assignment.buff] = assignment.paladin.name
+			provided[assignment.buff] = assignment
 		end
+		local usedAssignments = {}
 
-		for _, assignment in ipairs(selected) do
-			local replacement = self:FindReplacementBuff(assignment.paladin, priority, provided, assignment.buff)
-			if replacement then
-				SetPlanNormal(plan, assignment.paladin, classID, unit.name, replacement, assignment.buff)
-				provided[assignment.buff] = nil
-				provided[replacement] = assignment.paladin.name
-				plan.debugLines[#plan.debugLines + 1] = string.format(
-					"%s: %s replaces %s with %s because %s priority is %s.",
-					unit.name,
-					assignment.paladin.name,
-					BuffText(assignment.buff),
-					BuffText(replacement),
-					RoleText(unit.role),
-					JoinBuffs(priority)
-				)
+		for buffIndex, replacement in ipairs(priority) do
+			if not provided[replacement] then
+				local assignment = self:FindBestReplacementAssignment(priority, replacement, buffIndex, selected, usedAssignments)
+				if assignment then
+					SetPlanNormal(plan, assignment.paladin, classID, unit.name, replacement, assignment.buff)
+					usedAssignments[assignment] = true
+					provided[assignment.buff] = nil
+					provided[replacement] = assignment
+					plan.debugLines[#plan.debugLines + 1] = string.format(
+						"%s: %s replaces %s with %s because %s priority is %s.",
+						unit.name,
+						assignment.paladin.name,
+						BuffText(assignment.buff),
+						BuffText(replacement),
+						RoleText(unit.role),
+						JoinBuffs(priority)
+					)
+				end
 			end
 		end
 	end
@@ -4245,20 +4278,32 @@ function PPA:AssignmentString(assignments)
 	return table.concat(parts, "")
 end
 
-function PPA:SendPlanMessages(plan)
+function PPA:ShouldSendPlanForPaladin(paladinName, context)
+	if not self:ShouldWarnSmartAssignRaidAuthority() then
+		return true
+	end
+	local playerName = RemoveRealmName(context and context.playerName or (_G.PallyPower and _G.PallyPower.player))
+	return playerName and RemoveRealmName(paladinName) == playerName
+end
+
+function PPA:SendPlanMessages(plan, context)
 	if not _G.PallyPower or not _G.PallyPower.SendMessage then
 		return
 	end
 
-	for paladinName, assignments in pairs(plan.assignments) do
-		_G.PallyPower:SendMessage("PASSIGN " .. paladinName .. "@" .. self:AssignmentString(assignments))
+	for paladinName, assignments in pairs(plan.assignments or {}) do
+		if self:ShouldSendPlanForPaladin(paladinName, context) then
+			_G.PallyPower:SendMessage("PASSIGN " .. paladinName .. "@" .. self:AssignmentString(assignments))
+		end
 	end
 
 	local normalList = {}
-	for paladinName, classMap in pairs(plan.normalAssignments) do
-		for classID, targets in pairs(classMap) do
-			for targetName, buff in pairs(targets) do
-				normalList[#normalList + 1] = string.format("%s %s %s %s", paladinName, classID, targetName, buff)
+	for paladinName, classMap in pairs(plan.normalAssignments or {}) do
+		if self:ShouldSendPlanForPaladin(paladinName, context) then
+			for classID, targets in pairs(classMap) do
+				for targetName, buff in pairs(targets) do
+					normalList[#normalList + 1] = string.format("%s %s %s %s", paladinName, classID, targetName, buff)
+				end
 			end
 		end
 	end
@@ -4267,7 +4312,49 @@ function PPA:SendPlanMessages(plan)
 	end
 
 	for paladinName, aura in pairs(plan.auraAssignments or {}) do
-		_G.PallyPower:SendMessage("AASSIGN " .. paladinName .. " " .. SafeNumber(aura, 0))
+		if self:ShouldSendPlanForPaladin(paladinName, context) then
+			_G.PallyPower:SendMessage("AASSIGN " .. paladinName .. " " .. SafeNumber(aura, 0))
+		end
+	end
+end
+
+function PPA:ClearManagedNormalAssignments(context, plan)
+	local managedTargets = {}
+	local function mark(classID, targetName)
+		classID = SafeNumber(classID, 0)
+		targetName = RemoveRealmName(targetName)
+		if classID <= 0 or not targetName or targetName == "" then
+			return
+		end
+		if not managedTargets[classID] then
+			managedTargets[classID] = {}
+		end
+		managedTargets[classID][targetName] = true
+	end
+
+	for _, unit in ipairs(context and context.players or {}) do
+		mark(unit.classID, unit.name)
+		mark(unit.classID, unit.fullName)
+	end
+	for _, classMap in pairs(plan and plan.normalAssignments or {}) do
+		for classID, targets in pairs(classMap or {}) do
+			for targetName in pairs(targets or {}) do
+				mark(classID, targetName)
+			end
+		end
+	end
+
+	for _, classMap in pairs(_G.PallyPower_NormalAssignments or {}) do
+		for classID, targets in pairs(classMap or {}) do
+			local managed = managedTargets[SafeNumber(classID, 0)]
+			if managed then
+				for targetName in pairs(targets or {}) do
+					if managed[RemoveRealmName(targetName)] then
+						targets[targetName] = nil
+					end
+				end
+			end
+		end
 	end
 end
 
@@ -4301,7 +4388,9 @@ function PPA:ApplyPlan(plan, context)
 		end
 	end
 
-	for paladinName, classMap in pairs(plan.normalAssignments) do
+	self:ClearManagedNormalAssignments(context, plan)
+
+	for paladinName, classMap in pairs(plan.normalAssignments or {}) do
 		for classID, targets in pairs(classMap) do
 			local normalTable = EnsurePallyPowerNormalTable(paladinName, classID)
 			for targetName, buff in pairs(targets) do
@@ -4322,7 +4411,7 @@ function PPA:ApplyPlan(plan, context)
 
 	local function afterAssignments()
 		if not simulation then
-			self:SendPlanMessages(plan)
+			self:SendPlanMessages(plan, context)
 		end
 		if _G.PallyPower.UpdateRoster then
 			_G.PallyPower:UpdateRoster()

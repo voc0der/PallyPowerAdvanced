@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+## [0.1.36] - 2026-05-25
+
+### Fixed
+- Prefer Blessing of Light over Might/Wisdom for feral druid tanks when a holy paladin is available, while preserving useful pet override ordering.
+- Clear stale normal blessing overrides for managed raid targets before applying a new Smart-Assign plan so old paladin rows do not linger beside the new assignment.
+- Limit non-assistant raid broadcasts to the local paladin row so PallyPower accepts the assignments that can actually stick.
+
+### Tests
+- Add coverage for tank druid Light ordering, stale normal override cleanup, and non-assistant broadcast scoping.
+
 ## [0.1.35] - 2026-05-25
 
 ### Changed
