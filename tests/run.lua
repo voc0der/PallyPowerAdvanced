@@ -169,6 +169,18 @@ test("warrior tank gets light over might when a holy paladin is present", functi
 	assertEquals(plan.normalAssignments.Retadin[1].Slammer, nil, "DPS warriors should keep class-wide might")
 end)
 
+test("druid tank ranks light above might and wisdom when a holy paladin is present", function()
+	local context = {pallyCount = 3, healingPaladinPresent = true, improvedWisdomPaladinPresent = true}
+	local tank = {name = "Bearwall", class = "DRUID", classID = 4, role = "TANK", spec = "FERAL_TANK"}
+
+	local priority = T.GetPriorityForUnit(tank, context)
+	assertEquals(priority[1], T.BUFF_KINGS, "druid tank first priority")
+	assertEquals(priority[2], T.BUFF_SANCTUARY, "druid tank second priority")
+	assertEquals(priority[3], T.BUFF_LIGHT, "druid tank should prefer light before might")
+	assertEquals(priority[4], T.BUFF_MIGHT, "druid tank should prefer might before wisdom")
+	assertEquals(priority[5], T.BUFF_WISDOM, "druid tank should put wisdom last")
+end)
+
 test("pvp priority removes salvation and pushes sanctuary last", function()
 	local context = {pvpInstance = true, healingPaladinPresent = true, improvedWisdomPaladinPresent = true, pallyCount = 4}
 	local rogue = {name = "Sneaky", class = "ROGUE", classID = 2, role = "DAMAGER"}
@@ -2121,6 +2133,31 @@ test("simulation paladin tank keeps improved wisdom and gets light from ret", fu
 	assertEquals(plan.normalAssignments.PpaSimRet1[5].PpaSimProt1, T.BUFF_LIGHT, "ret paladin should replace useless salvation with light")
 end)
 
+test("simulation tank druid gets holy light before might when wisdom is class-wide", function()
+	local context = T.BuildSimulationContext(5)
+	local plan = T.BuildSmartPlan(context)
+
+	assertEquals(plan.assignments.PpaSimHoly[4], T.BUFF_WISDOM, "seed should put holy wisdom on druids")
+	assertEquals(plan.assignments.PpaSimRet1[4], T.BUFF_SALVATION, "seed should put ret salvation on druids")
+	assertEquals(
+		plan.normalAssignments.PpaSimHoly and plan.normalAssignments.PpaSimHoly[4] and plan.normalAssignments.PpaSimHoly[4].PpaSimTankDruid1,
+		T.BUFF_LIGHT,
+		"holy wisdom should become light for the tank druid"
+	)
+	assertEquals(
+		plan.normalAssignments.PpaSimRet1 and plan.normalAssignments.PpaSimRet1[4] and plan.normalAssignments.PpaSimRet1[4].PpaSimTankDruid1,
+		T.BUFF_MIGHT,
+		"ret salvation can become might after light is covered"
+	)
+	local warriorHasLight = false
+	for _, classMap in pairs(plan.normalAssignments or {}) do
+		if classMap[1] and classMap[1].PpaSimTankWar1 == T.BUFF_LIGHT then
+			warriorHasLight = true
+		end
+	end
+	assertEquals(warriorHasLight, true, "tank warrior should still receive light")
+end)
+
 test("simulation keeps kings on kings-capable paladins while preserving sanctuary", function()
 	local context = T.BuildSimulationContext(1)
 	local plan = T.BuildSmartPlan(context)
@@ -2590,6 +2627,123 @@ test("smart assign does not warn raid assistants about own-row limits", function
 	_G.UnitIsGroupLeader = old.UnitIsGroupLeader
 	_G.UnitIsGroupAssistant = old.UnitIsGroupAssistant
 	PPA.simulation = old.simulation
+end)
+
+test("applying a plan removes stale normal overrides for managed raid targets", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_AuraAssignments = _G.PallyPower_AuraAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		C_Timer = _G.C_Timer,
+	}
+
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.PallyPower_Assignments = {Turing = {}, Blys = {}}
+	_G.PallyPower_NormalAssignments = {
+		Turing = {[5] = {Blys = T.BUFF_MIGHT, Otherpal = T.BUFF_LIGHT}},
+		Blys = {[5] = {Blys = T.BUFF_SANCTUARY}},
+	}
+	_G.PallyPower_AuraAssignments = {}
+	_G.C_Timer = {After = function(_, callback) callback() end}
+	_G.PallyPower = {
+		player = "Turing",
+		ClearAssignments = function() end,
+		UpdateRoster = function() end,
+		UpdateLayout = function() end,
+	}
+
+	local context = {
+		playerName = "Turing",
+		players = {{name = "Blys", fullName = "Blys-Realm", classID = 5}},
+		paladins = {{name = "Turing", hasAddon = true}, {name = "Blys", hasAddon = true}},
+	}
+	local plan = {
+		assignments = {Turing = {[5] = T.BUFF_KINGS}, Blys = {[5] = T.BUFF_SANCTUARY}},
+		normalAssignments = {Turing = {[5] = {Blys = T.BUFF_LIGHT}}},
+		auraAssignments = {},
+	}
+
+	assertEquals(T.ApplyPlan(plan, context), true, "plan should apply")
+	assertEquals(_G.PallyPower_NormalAssignments.Turing[5].Blys, T.BUFF_LIGHT, "planned normal override should be written")
+	assertEquals(_G.PallyPower_NormalAssignments.Blys[5].Blys, nil, "stale duplicate normal override should be removed")
+	assertEquals(_G.PallyPower_NormalAssignments.Turing[5].Otherpal, T.BUFF_LIGHT, "unmanaged targets should be left alone")
+
+	_G.PallyPower = old.PallyPower
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_AuraAssignments = old.PallyPower_AuraAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.C_Timer = old.C_Timer
+end)
+
+test("raid non-assist broadcasts only the local paladin row", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		PP_Leader = _G.PP_Leader,
+		PallyPower_Assignments = _G.PallyPower_Assignments,
+		PallyPower_NormalAssignments = _G.PallyPower_NormalAssignments,
+		PallyPower_AuraAssignments = _G.PallyPower_AuraAssignments,
+		PALLYPOWER_MAXCLASSES = _G.PALLYPOWER_MAXCLASSES,
+		C_Timer = _G.C_Timer,
+		IsInRaid = _G.IsInRaid,
+		UnitIsGroupLeader = _G.UnitIsGroupLeader,
+		UnitIsGroupAssistant = _G.UnitIsGroupAssistant,
+	}
+	local messages = {}
+
+	_G.PP_Leader = true
+	_G.PALLYPOWER_MAXCLASSES = 9
+	_G.PallyPower_Assignments = {Turing = {}, Blys = {}}
+	_G.PallyPower_NormalAssignments = {}
+	_G.PallyPower_AuraAssignments = {}
+	_G.C_Timer = {After = function(_, callback) callback() end}
+	_G.IsInRaid = function() return true end
+	_G.UnitIsGroupLeader = function() return false end
+	_G.UnitIsGroupAssistant = function() return false end
+	_G.PallyPower = {
+		player = "Turing",
+		CheckLeader = function() return false end,
+		ClearAssignments = function() end,
+		SendMessage = function(_, message) messages[#messages + 1] = message end,
+		UpdateRoster = function() end,
+		UpdateLayout = function() end,
+	}
+
+	local context = {
+		playerName = "Turing",
+		players = {{name = "Blys", classID = 5}},
+		paladins = {{name = "Turing", hasAddon = true}, {name = "Blys", hasAddon = true}},
+	}
+	local plan = {
+		assignments = {Turing = {[5] = T.BUFF_KINGS}, Blys = {[5] = T.BUFF_SANCTUARY}},
+		normalAssignments = {
+			Turing = {[5] = {Blys = T.BUFF_LIGHT}},
+			Blys = {[5] = {Blys = T.BUFF_SANCTUARY}},
+		},
+		auraAssignments = {Turing = T.AURA_DEVOTION, Blys = T.AURA_RETRIBUTION},
+	}
+
+	assertEquals(T.ApplyPlan(plan, context), true, "plan should apply")
+	local joined = table.concat(messages, "\n")
+	assertEquals(string.find(joined, "PASSIGN Turing@") ~= nil, true, "local class row should be broadcast")
+	assertEquals(string.find(joined, "NASSIGN Turing 5 Blys " .. tostring(T.BUFF_LIGHT)) ~= nil, true, "local normal row should be broadcast")
+	assertEquals(string.find(joined, "AASSIGN Turing ") ~= nil, true, "local aura row should be broadcast")
+	assertEquals(string.find(joined, "PASSIGN Blys@") == nil, true, "remote class row should not be broadcast")
+	assertEquals(string.find(joined, "NASSIGN Blys ") == nil, true, "remote normal row should not be broadcast")
+	assertEquals(string.find(joined, "AASSIGN Blys ") == nil, true, "remote aura row should not be broadcast")
+
+	_G.PallyPower = old.PallyPower
+	_G.PP_Leader = old.PP_Leader
+	_G.PallyPower_Assignments = old.PallyPower_Assignments
+	_G.PallyPower_NormalAssignments = old.PallyPower_NormalAssignments
+	_G.PallyPower_AuraAssignments = old.PallyPower_AuraAssignments
+	_G.PALLYPOWER_MAXCLASSES = old.PALLYPOWER_MAXCLASSES
+	_G.C_Timer = old.C_Timer
+	_G.IsInRaid = old.IsInRaid
+	_G.UnitIsGroupLeader = old.UnitIsGroupLeader
+	_G.UnitIsGroupAssistant = old.UnitIsGroupAssistant
 end)
 
 test("local blessings report groups classes and single overrides by blessing", function()
