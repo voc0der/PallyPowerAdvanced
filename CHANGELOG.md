@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+## [0.1.35] - 2026-05-25
+
+### Changed
+- Move PallyPowerAdvanced Wisdom preference controls into their own `PallyPowerAdvanced` AddOns options category instead of injecting a tab into PallyPower Classic.
+- Store the Wisdom preference settings in `PallyPowerAdvancedDB`, with migration from the previous PallyPower profile keys when present.
+
+### Tests
+- Add coverage for the standalone PallyPowerAdvanced options category and legacy option migration.
+
 ## [0.1.34] - 2026-05-25
 
 ### Fixed

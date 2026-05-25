@@ -335,16 +335,24 @@ local function ContextAlwaysPreferWisdomOnHealers(context)
 	if type(context) == "table" and context.alwaysPreferWisdomOnHealers ~= nil then
 		return context.alwaysPreferWisdomOnHealers == true
 	end
-	local opt = _G.PallyPower and _G.PallyPower.opt
-	return type(opt) == "table" and opt.AlwaysPreferWisdomOnHealers == true
+	local db = _G.PallyPowerAdvancedDB
+	if type(db) == "table" and db.alwaysPreferWisdomOnHealers ~= nil then
+		return db.alwaysPreferWisdomOnHealers == true
+	end
+	local legacyOpt = _G.PallyPower and _G.PallyPower.opt
+	return type(legacyOpt) == "table" and legacyOpt.AlwaysPreferWisdomOnHealers == true
 end
 
 local function ContextAlwaysPreferWisdomOnPaladinTanks(context)
 	if type(context) == "table" and context.alwaysPreferWisdomOnPaladinTanks ~= nil then
 		return context.alwaysPreferWisdomOnPaladinTanks == true
 	end
-	local opt = _G.PallyPower and _G.PallyPower.opt
-	return type(opt) == "table" and opt.AlwaysPreferWisdomOnPaladinTanks == true
+	local db = _G.PallyPowerAdvancedDB
+	if type(db) == "table" and db.alwaysPreferWisdomOnPaladinTanks ~= nil then
+		return db.alwaysPreferWisdomOnPaladinTanks == true
+	end
+	local legacyOpt = _G.PallyPower and _G.PallyPower.opt
+	return type(legacyOpt) == "table" and legacyOpt.AlwaysPreferWisdomOnPaladinTanks == true
 end
 
 local function UnitNamesMatch(left, right)
@@ -402,6 +410,24 @@ function PPA:EnsureDB()
 	end
 	if db.buffWarningSound == nil then
 		db.buffWarningSound = true
+	end
+	if db.advancedOptionsMigrated ~= true then
+		local legacyOpt = _G.PallyPower and _G.PallyPower.opt
+		if type(legacyOpt) == "table" then
+			if legacyOpt.AlwaysPreferWisdomOnHealers ~= nil then
+				db.alwaysPreferWisdomOnHealers = legacyOpt.AlwaysPreferWisdomOnHealers == true
+			end
+			if legacyOpt.AlwaysPreferWisdomOnPaladinTanks ~= nil then
+				db.alwaysPreferWisdomOnPaladinTanks = legacyOpt.AlwaysPreferWisdomOnPaladinTanks == true
+			end
+			db.advancedOptionsMigrated = true
+		end
+	end
+	if db.alwaysPreferWisdomOnHealers == nil then
+		db.alwaysPreferWisdomOnHealers = false
+	end
+	if db.alwaysPreferWisdomOnPaladinTanks == nil then
+		db.alwaysPreferWisdomOnPaladinTanks = false
 	end
 	self.db = db
 	return db
@@ -4882,178 +4908,86 @@ function PPA:ReflowButtons()
 	end
 end
 
-local function EnsureSpecialFrameName(frameName)
-	if type(_G.UISpecialFrames) ~= "table" then
-		return
-	end
-	for _, existing in ipairs(_G.UISpecialFrames) do
-		if existing == frameName then
-			return
-		end
-	end
-	table.insert(_G.UISpecialFrames, frameName)
-end
-
-local function HidePallyPowerConfigFrame(frame)
-	if not frame then
-		return
-	end
-	if type(frame.obj) == "table" and type(frame.obj.Hide) == "function" then
-		pcall(frame.obj.Hide, frame.obj)
-	elseif type(frame.Hide) == "function" then
-		pcall(frame.Hide, frame)
-	end
-end
-
-function PPA:RebuildPallyPowerStandaloneOptions()
-	if self.pallyPowerStandaloneOptionsReady and self.pallyPowerStandaloneFrame == _G.PallyPowerConfigFrame then
-		return true
-	end
-	local oldFrame = _G.PallyPowerConfigFrame
-	if not oldFrame then
-		return false
-	end
-	if type(_G.LibStub) ~= "function" then
-		return false
-	end
-
-	local okGui, aceGui = pcall(_G.LibStub, "AceGUI-3.0", true)
-	local okDialog, dialog = pcall(_G.LibStub, "AceConfigDialog-3.0", true)
-	if not okGui or not aceGui or type(aceGui.Create) ~= "function" then
-		return false
-	end
-	if not okDialog or not dialog or type(dialog.Open) ~= "function" then
-		return false
-	end
-
-	local wasShown = oldFrame and type(oldFrame.IsShown) == "function" and oldFrame:IsShown()
-	HidePallyPowerConfigFrame(oldFrame)
-
-	local okCreate, configFrame = pcall(aceGui.Create, aceGui, "Frame")
-	if not okCreate or type(configFrame) ~= "table" or not configFrame.frame then
-		return false
-	end
-	if type(configFrame.EnableResize) == "function" then
-		pcall(configFrame.EnableResize, configFrame, false)
-	end
-	if type(dialog.SetDefaultSize) == "function" then
-		pcall(dialog.SetDefaultSize, dialog, "PallyPower", 625, 580)
-	end
-	local opened = pcall(dialog.Open, dialog, "PallyPower", configFrame)
-	if not opened then
-		HidePallyPowerConfigFrame(configFrame.frame)
-		return false
-	end
-
-	_G.PallyPowerConfigFrame = configFrame.frame
-	EnsureSpecialFrameName("PallyPowerConfigFrame")
-	self.pallyPowerStandaloneFrame = configFrame.frame
-	self.pallyPowerStandaloneOptionsReady = true
-
-	if not wasShown then
-		HidePallyPowerConfigFrame(configFrame.frame)
-	end
-	return true
-end
-
-function PPA:RefreshPallyPowerStandaloneOptions()
-	return self:RebuildPallyPowerStandaloneOptions()
-end
-
-function PPA:EnsurePallyPowerAdvancedOptions()
-	local pallyPower = _G.PallyPower
-	if not pallyPower or type(pallyPower.options) ~= "table" or type(pallyPower.options.args) ~= "table" then
-		return false
-	end
-
-	local function getOpt()
-		local opt = pallyPower.opt
-		if type(opt) ~= "table" then
-			return nil
-		end
-		if opt.AlwaysPreferWisdomOnHealers == nil then
-			opt.AlwaysPreferWisdomOnHealers = false
-		end
-		if opt.AlwaysPreferWisdomOnPaladinTanks == nil then
-			opt.AlwaysPreferWisdomOnPaladinTanks = false
-		end
-		return opt
-	end
-	getOpt()
-
-	pallyPower.options.args.advanced = {
-		order = 4,
-		name = "Advanced",
-		desc = "PallyPowerAdvanced settings",
+function PPA:BuildOptionsTable()
+	return {
+		name = "PallyPowerAdvanced",
 		type = "group",
-		cmdHidden = true,
+		childGroups = "tab",
 		args = {
-			advanced_settings = {
+			settings = {
 				order = 1,
-				name = "PallyPowerAdvanced Settings",
+				name = "Settings",
 				type = "group",
-				inline = true,
 				args = {
-					always_prefer_wisdom_on_healers = {
+					advanced_settings = {
 						order = 1,
-						type = "toggle",
-						name = "Always Prefer Wisdom on Healers",
-						desc = "Prefer Blessing of Wisdom over Blessing of Kings for healer assignments even when Wisdom is not improved.",
-						width = "full",
-						get = function()
-							local opt = getOpt()
-							return opt and opt.AlwaysPreferWisdomOnHealers == true or false
-						end,
-						set = function(_, value)
-							local opt = getOpt()
-							if opt then
-								opt.AlwaysPreferWisdomOnHealers = value == true
-							end
-						end,
-					},
-					always_prefer_wisdom_on_paladin_tanks = {
-						order = 2,
-						type = "toggle",
-						name = "Always Prefer Wisdom for Paladin Tanks",
-						desc = "Prefer Blessing of Wisdom over Blessing of Kings for paladin tank assignments regardless of active spec data.",
-						width = "full",
-						get = function()
-							local opt = getOpt()
-							return opt and opt.AlwaysPreferWisdomOnPaladinTanks == true or false
-						end,
-						set = function(_, value)
-							local opt = getOpt()
-							if opt then
-								opt.AlwaysPreferWisdomOnPaladinTanks = value == true
-							end
-						end,
+						name = "PallyPowerAdvanced Settings",
+						type = "group",
+						inline = true,
+						args = {
+							always_prefer_wisdom_on_healers = {
+								order = 1,
+								type = "toggle",
+								name = "Always Prefer Wisdom on Healers",
+								desc = "Prefer Blessing of Wisdom over Blessing of Kings for healer assignments even when Wisdom is not improved.",
+								width = "full",
+								get = function()
+									return PPA:EnsureDB().alwaysPreferWisdomOnHealers == true
+								end,
+								set = function(_, value)
+									PPA:EnsureDB().alwaysPreferWisdomOnHealers = value == true
+								end,
+							},
+							always_prefer_wisdom_on_paladin_tanks = {
+								order = 2,
+								type = "toggle",
+								name = "Always Prefer Wisdom for Paladin Tanks",
+								desc = "Prefer Blessing of Wisdom over Blessing of Kings for paladin tank assignments regardless of active spec data.",
+								width = "full",
+								get = function()
+									return PPA:EnsureDB().alwaysPreferWisdomOnPaladinTanks == true
+								end,
+								set = function(_, value)
+									PPA:EnsureDB().alwaysPreferWisdomOnPaladinTanks = value == true
+								end,
+							},
+						},
 					},
 				},
 			},
 		},
 	}
-
-	if type(_G.LibStub) == "function" then
-		local ok, registry = pcall(_G.LibStub, "AceConfigRegistry-3.0", true)
-		if ok and registry and type(registry.NotifyChange) == "function" then
-			registry:NotifyChange("PallyPower")
-		end
-	end
-	self:RefreshPallyPowerStandaloneOptions()
-	return true
 end
 
-function PPA:InstallPallyPowerConfigWindowHook()
-	local pallyPower = _G.PallyPower
-	if self.pallyPowerConfigWindowHooked or type(pallyPower) ~= "table" or type(pallyPower.OpenConfigWindow) ~= "function" then
+function PPA:RegisterPallyPowerAdvancedOptions()
+	self:EnsureDB()
+	if self.optionsRegistered then
+		return true
+	end
+	if type(_G.LibStub) ~= "function" then
 		return false
 	end
-	local originalOpenConfigWindow = pallyPower.OpenConfigWindow
-	pallyPower.OpenConfigWindow = function(self, ...)
-		PPA:EnsurePallyPowerAdvancedOptions()
-		return originalOpenConfigWindow(self, ...)
+
+	local okConfig, config = pcall(_G.LibStub, "AceConfig-3.0", true)
+	local okDialog, dialog = pcall(_G.LibStub, "AceConfigDialog-3.0", true)
+	if not okConfig or not config or type(config.RegisterOptionsTable) ~= "function" then
+		return false
 	end
-	self.pallyPowerConfigWindowHooked = true
+	if not okDialog or not dialog or type(dialog.AddToBlizOptions) ~= "function" then
+		return false
+	end
+
+	self.options = self.options or self:BuildOptionsTable()
+	local okRegister = pcall(config.RegisterOptionsTable, config, "PallyPowerAdvanced", self.options, {"ppa", "pallypoweradvanced"})
+	if not okRegister then
+		return false
+	end
+	local okAdd, optionsFrame = pcall(dialog.AddToBlizOptions, dialog, "PallyPowerAdvanced", "PallyPowerAdvanced")
+	if not okAdd then
+		return false
+	end
+	self.optionsFrame = optionsFrame
+	self.optionsRegistered = true
 	return true
 end
 
@@ -5061,8 +4995,7 @@ function PPA:HookPallyPower()
 	if not _G.PallyPower then
 		return
 	end
-	self:EnsurePallyPowerAdvancedOptions()
-	self:InstallPallyPowerConfigWindowHook()
+	self:EnsureDB()
 	self:HookAssignmentAlerts()
 	self:InstallSimulationHooks()
 	self:InstallAssignmentActionHooks()
@@ -5161,6 +5094,7 @@ function PPA:OnEvent(event, arg1, arg2, arg3, arg4)
 			self:EnsureDB()
 			self:RestoreStaleSimulationState()
 			self:RegisterSlash()
+			self:RegisterPallyPowerAdvancedOptions()
 		elseif arg1 == "PallyPower" then
 			self:RestoreStaleSimulationState()
 			self:HookPallyPower()
@@ -5169,6 +5103,7 @@ function PPA:OnEvent(event, arg1, arg2, arg3, arg4)
 		self:EnsureDB()
 		self:RestoreStaleSimulationState()
 		self:RegisterSlash()
+		self:RegisterPallyPowerAdvancedOptions()
 		self:HookPallyPower()
 		self:BroadcastSpec()
 	elseif event == "PLAYER_ENTERING_WORLD" then
@@ -5184,6 +5119,7 @@ function PPA:Initialize()
 	self:EnsureDB()
 	self:RestoreStaleSimulationState()
 	self:RegisterSlash()
+	self:RegisterPallyPowerAdvancedOptions()
 	self:HookPallyPower()
 	if type(_G.CreateFrame) == "function" and not self.eventFrame then
 		local eventFrame = _G.CreateFrame("Frame")
@@ -5293,17 +5229,11 @@ PPA._test = {
 	InstallLocalReportHook = function()
 		return PPA:InstallLocalReportHook()
 	end,
-	EnsurePallyPowerAdvancedOptions = function()
-		return PPA:EnsurePallyPowerAdvancedOptions()
+	BuildOptionsTable = function()
+		return PPA:BuildOptionsTable()
 	end,
-	RefreshPallyPowerStandaloneOptions = function()
-		return PPA:RefreshPallyPowerStandaloneOptions()
-	end,
-	RebuildPallyPowerStandaloneOptions = function()
-		return PPA:RebuildPallyPowerStandaloneOptions()
-	end,
-	InstallPallyPowerConfigWindowHook = function()
-		return PPA:InstallPallyPowerConfigWindowHook()
+	RegisterPallyPowerAdvancedOptions = function()
+		return PPA:RegisterPallyPowerAdvancedOptions()
 	end,
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)
