@@ -331,6 +331,22 @@ local function ContextHasImprovedWisdom(context)
 	return false
 end
 
+local function ContextAlwaysPreferWisdomOnHealers(context)
+	if type(context) == "table" and context.alwaysPreferWisdomOnHealers ~= nil then
+		return context.alwaysPreferWisdomOnHealers == true
+	end
+	local opt = _G.PallyPower and _G.PallyPower.opt
+	return type(opt) == "table" and opt.AlwaysPreferWisdomOnHealers == true
+end
+
+local function ContextAlwaysPreferWisdomOnPaladinTanks(context)
+	if type(context) == "table" and context.alwaysPreferWisdomOnPaladinTanks ~= nil then
+		return context.alwaysPreferWisdomOnPaladinTanks == true
+	end
+	local opt = _G.PallyPower and _G.PallyPower.opt
+	return type(opt) == "table" and opt.AlwaysPreferWisdomOnPaladinTanks == true
+end
+
 local function UnitNamesMatch(left, right)
 	if not left or not right then
 		return false
@@ -550,12 +566,34 @@ function PPA:UnitHasImprovedWisdom(unit, context)
 	return type(specData) == "table" and SafeNumber(specData.impWisdom, 0) > 0
 end
 
+local function UnitIsKnownPet(unit)
+	if type(unit) ~= "table" then
+		return false
+	end
+	if unit.isPet == true then
+		return true
+	end
+	local token = unit.unit or unit.unitid
+	return type(token) == "string" and string.find(token, "pet") ~= nil
+end
+
+local function SpecDataHasProtectionTalents(specData)
+	return type(specData) == "table"
+		and (SafeNumber(specData.holyShield, 0) > 0 or SafeNumber(specData.impSanc, 0) > 0)
+end
+
 function PPA:GetBasePriorityForUnit(unit, context)
 	local role = NormalizeRole(unit.role)
 	local includeLight = context and context.healingPaladinPresent
 	local improvedWisdom = ContextHasImprovedWisdom(context)
+	local preferWisdomOnHealers = improvedWisdom or ContextAlwaysPreferWisdomOnHealers(context)
+	local preferWisdomOnPaladinTanks = ContextAlwaysPreferWisdomOnPaladinTanks(context)
 	local class = unit.class
 	local spec = unit.spec
+
+	if UnitIsKnownPet(unit) then
+		return BuildPriority(includeLight, BUFF_KINGS, BUFF_MIGHT, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
+	end
 
 	if class == "WARRIOR" then
 		if role == ROLE_TANK then
@@ -566,7 +604,7 @@ function PPA:GetBasePriorityForUnit(unit, context)
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_MIGHT, BUFF_KINGS, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "PRIEST" then
 		if role == ROLE_HEALER then
-			if not improvedWisdom then
+			if not preferWisdomOnHealers then
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
@@ -576,7 +614,7 @@ function PPA:GetBasePriorityForUnit(unit, context)
 		if role == ROLE_TANK then
 			return BuildPriority(includeLight, BUFF_KINGS, BUFF_SANCTUARY, BUFF_LIGHT, BUFF_MIGHT, BUFF_WISDOM)
 		elseif role == ROLE_HEALER then
-			if not improvedWisdom then
+			if not preferWisdomOnHealers then
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
@@ -586,8 +624,27 @@ function PPA:GetBasePriorityForUnit(unit, context)
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_MIGHT, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "PALADIN" then
 		local targetHasImprovedWisdom = self:UnitHasImprovedWisdom(unit, context)
+		local specData = self:GetUnitSpecData(unit.name)
+		if role == ROLE_TANK and preferWisdomOnPaladinTanks then
+			if specData and (specData.sanctityAura or 0) > 0 then
+				return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_KINGS, BUFF_LIGHT, BUFF_MIGHT)
+			end
+			if specData then
+				return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SANCTUARY, BUFF_LIGHT, BUFF_MIGHT)
+			end
+			if (context and context.pallyCount or 0) > 2 then
+				return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_WISDOM, BUFF_KINGS, BUFF_LIGHT, BUFF_MIGHT)
+			end
+			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SANCTUARY, BUFF_LIGHT, BUFF_MIGHT)
+		end
+		if role == ROLE_TANK
+			and targetHasImprovedWisdom
+			and specData
+			and not SpecDataHasProtectionTalents(specData)
+		then
+			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY, BUFF_MIGHT)
+		end
 		if role == ROLE_TANK then
-			local specData = self:GetUnitSpecData(unit.name)
 			if specData then
 				if (specData.sanctityAura or 0) > 0 then
 					if improvedWisdom or targetHasImprovedWisdom then
@@ -605,7 +662,7 @@ function PPA:GetBasePriorityForUnit(unit, context)
 			end
 			return BuildPriority(includeLight, BUFF_SANCTUARY, BUFF_KINGS, BUFF_LIGHT, BUFF_WISDOM, BUFF_MIGHT)
 		elseif role == ROLE_HEALER or targetHasImprovedWisdom then
-			if not (improvedWisdom or targetHasImprovedWisdom) then
+			if not (preferWisdomOnHealers or targetHasImprovedWisdom) then
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
@@ -617,7 +674,7 @@ function PPA:GetBasePriorityForUnit(unit, context)
 		return BuildPriority(includeLight, BUFF_SALVATION, BUFF_KINGS, BUFF_WISDOM, BUFF_LIGHT, BUFF_SANCTUARY)
 	elseif class == "SHAMAN" then
 		if role == ROLE_HEALER then
-			if not improvedWisdom then
+			if not preferWisdomOnHealers then
 				return BuildPriority(includeLight, BUFF_KINGS, BUFF_WISDOM, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
 			end
 			return BuildPriority(includeLight, BUFF_WISDOM, BUFF_KINGS, BUFF_SALVATION, BUFF_LIGHT, BUFF_SANCTUARY)
@@ -886,6 +943,13 @@ local function IsBuffAllowedForClass(classID, buff)
 	return not (disallowed and disallowed[buff])
 end
 
+local function IsBuffAllowedForUnit(unit, buff)
+	if UnitIsKnownPet(unit) and buff == BUFF_MIGHT then
+		return true
+	end
+	return IsBuffAllowedForClass(unit and unit.classID, buff)
+end
+
 function PPA:CreateAssumedClassMember(classID)
 	local classFile = CLASS_FILES_BY_ID[classID]
 	if not classFile then
@@ -909,7 +973,7 @@ function PPA:ScoreClassBuffs(members, context)
 		local priority = self:GetPriorityForUnit(unit, context)
 		unit.priority = priority
 		for index, buff in ipairs(priority) do
-			if IsBuffAllowedForClass(unit.classID, buff) then
+			if IsBuffAllowedForUnit(unit, buff) then
 				local points = (#priority - index + 1) * 10
 				if index == 1 then
 					points = points + 8
@@ -2744,6 +2808,40 @@ function PPA:RefreshPallyPowerState()
 	end
 end
 
+function PPA:RefreshPallyPowerTalentState()
+	local pallyPower = _G.PallyPower
+	if not pallyPower then
+		return
+	end
+
+	if type(_G.PallyPower_Talents) == "table" then
+		for key in pairs(_G.PallyPower_Talents) do
+			_G.PallyPower_Talents[key] = nil
+		end
+	end
+	if pallyPower.ScanTalents then
+		pcall(pallyPower.ScanTalents, pallyPower)
+	end
+	self:RefreshPallyPowerState()
+	if pallyPower.SendSelf then
+		pcall(pallyPower.SendSelf, pallyPower)
+	end
+	if pallyPower.UpdateLayout then
+		pcall(pallyPower.UpdateLayout, pallyPower)
+	end
+end
+
+function PPA:HandleLocalTalentChanged()
+	self:RefreshPallyPowerTalentState()
+	self:BroadcastSpec()
+	if _G.C_Timer and type(_G.C_Timer.After) == "function" then
+		_G.C_Timer.After(1.0, function()
+			PPA:RefreshPallyPowerTalentState()
+			PPA:BroadcastSpec()
+		end)
+	end
+end
+
 local SIMULATION_TANK_CLASSES = {"WARRIOR", "DRUID", "PALADIN"}
 local SIMULATION_HEALER_CLASSES = {"PRIEST", "DRUID", "PALADIN", "SHAMAN"}
 local SIMULATION_DPS_CLASSES = {
@@ -3156,6 +3254,8 @@ function PPA:CloneSimulationContext(guess)
 		return nil
 	end
 
+	context.alwaysPreferWisdomOnHealers = ContextAlwaysPreferWisdomOnHealers(context)
+	context.alwaysPreferWisdomOnPaladinTanks = ContextAlwaysPreferWisdomOnPaladinTanks(context)
 	context.healingPaladinPresent = false
 	context.improvedWisdomPaladinPresent = false
 	for _, unit in ipairs(context.players or {}) do
@@ -3309,23 +3409,34 @@ end
 function PPA:CollectRoster()
 	local players = {}
 	local units = {}
+	local showPets = not (_G.PallyPower and _G.PallyPower.opt and _G.PallyPower.opt.ShowPets == false)
 
 	if _G.IsInRaid and _G.IsInRaid() then
 		local maxRaid = _G.MAX_RAID_MEMBERS or 40
 		for index = 1, maxRaid do
-			units[#units + 1] = {"raid" .. index, index}
+			units[#units + 1] = {"raid" .. index, index, false}
+			if showPets then
+				units[#units + 1] = {"raidpet" .. index, index, true}
+			end
 		end
 	else
-		units[#units + 1] = {"player", nil}
+		units[#units + 1] = {"player", nil, false}
+		if showPets then
+			units[#units + 1] = {"pet", nil, true}
+		end
 		local maxParty = _G.MAX_PARTY_MEMBERS or 4
 		for index = 1, maxParty do
-			units[#units + 1] = {"party" .. index, nil}
+			units[#units + 1] = {"party" .. index, nil, false}
+			if showPets then
+				units[#units + 1] = {"partypet" .. index, nil, true}
+			end
 		end
 	end
 
 	for _, unitInfo in ipairs(units) do
 		local unit = unitInfo[1]
 		local raidIndex = unitInfo[2]
+		local isPet = unitInfo[3]
 		if (not _G.UnitExists) or _G.UnitExists(unit) then
 			local fullName = GetUnitNameSafe(unit)
 			local classFile
@@ -3341,13 +3452,15 @@ function PPA:CollectRoster()
 				local rank = 0
 				if raidIndex and _G.GetRaidRosterInfo then
 					local rosterName, rosterRank, rosterSubgroup, _, _, rosterClass, _, _, _, rosterRole = _G.GetRaidRosterInfo(raidIndex)
-					if rosterName then
+					if rosterName and not isPet then
 						fullName = rosterName
 					end
 					rank = rosterRank or rank
 					subgroup = rosterSubgroup or subgroup
-					classFile = rosterClass or classFile
-					raidRole = rosterRole
+					if not isPet then
+						classFile = rosterClass or classFile
+						raidRole = rosterRole
+					end
 				elseif _G.UnitIsGroupLeader and _G.UnitIsGroupLeader(unit) then
 					rank = 2
 				end
@@ -3370,6 +3483,7 @@ function PPA:CollectRoster()
 					subgroup = subgroup,
 					rank = rank,
 					mainTank = mainTank,
+					isPet = isPet == true,
 				}
 
 				self:ApplyManualChoice(player)
@@ -3441,6 +3555,8 @@ function PPA:BuildRuntimeContext(guess)
 		playerName = _G.PallyPower and _G.PallyPower.player or (_G.UnitName and _G.UnitName("player")) or "",
 		healingPaladinPresent = false,
 		improvedWisdomPaladinPresent = false,
+		alwaysPreferWisdomOnHealers = ContextAlwaysPreferWisdomOnHealers(),
+		alwaysPreferWisdomOnPaladinTanks = ContextAlwaysPreferWisdomOnPaladinTanks(),
 		pvpInstance = pvpInstanceType ~= nil,
 		pvpInstanceType = pvpInstanceType,
 	}
@@ -4766,10 +4882,93 @@ function PPA:ReflowButtons()
 	end
 end
 
+function PPA:EnsurePallyPowerAdvancedOptions()
+	local pallyPower = _G.PallyPower
+	if not pallyPower or type(pallyPower.options) ~= "table" or type(pallyPower.options.args) ~= "table" then
+		return false
+	end
+
+	local function getOpt()
+		local opt = pallyPower.opt
+		if type(opt) ~= "table" then
+			return nil
+		end
+		if opt.AlwaysPreferWisdomOnHealers == nil then
+			opt.AlwaysPreferWisdomOnHealers = false
+		end
+		if opt.AlwaysPreferWisdomOnPaladinTanks == nil then
+			opt.AlwaysPreferWisdomOnPaladinTanks = false
+		end
+		return opt
+	end
+	getOpt()
+
+	pallyPower.options.args.advanced = {
+		order = 4,
+		name = "Advanced",
+		desc = "PallyPowerAdvanced settings",
+		type = "group",
+		cmdHidden = true,
+		args = {
+			advanced_settings = {
+				order = 1,
+				name = "PallyPowerAdvanced Settings",
+				type = "group",
+				inline = true,
+				args = {
+					always_prefer_wisdom_on_healers = {
+						order = 1,
+						type = "toggle",
+						name = "Always Prefer Wisdom on Healers",
+						desc = "Prefer Blessing of Wisdom over Blessing of Kings for healer assignments even when Wisdom is not improved.",
+						width = "full",
+						get = function()
+							local opt = getOpt()
+							return opt and opt.AlwaysPreferWisdomOnHealers == true or false
+						end,
+						set = function(_, value)
+							local opt = getOpt()
+							if opt then
+								opt.AlwaysPreferWisdomOnHealers = value == true
+							end
+						end,
+					},
+					always_prefer_wisdom_on_paladin_tanks = {
+						order = 2,
+						type = "toggle",
+						name = "Always Prefer Wisdom for Paladin Tanks",
+						desc = "Prefer Blessing of Wisdom over Blessing of Kings for paladin tank assignments regardless of active spec data.",
+						width = "full",
+						get = function()
+							local opt = getOpt()
+							return opt and opt.AlwaysPreferWisdomOnPaladinTanks == true or false
+						end,
+						set = function(_, value)
+							local opt = getOpt()
+							if opt then
+								opt.AlwaysPreferWisdomOnPaladinTanks = value == true
+							end
+						end,
+					},
+				},
+			},
+		},
+	}
+
+	if type(_G.LibStub) == "function" then
+		local ok, registry = pcall(_G.LibStub, "AceConfigRegistry-3.0", true)
+		if ok and registry and type(registry.NotifyChange) == "function" then
+			registry:NotifyChange("PallyPower")
+		end
+	end
+	return true
+end
+
 function PPA:HookPallyPower()
 	if not _G.PallyPower then
 		return
 	end
+	self:EnsurePallyPowerAdvancedOptions()
 	self:HookAssignmentAlerts()
 	self:InstallSimulationHooks()
 	self:InstallAssignmentActionHooks()
@@ -4880,8 +5079,8 @@ function PPA:OnEvent(event, arg1, arg2, arg3, arg4)
 		self:BroadcastSpec()
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		self:BroadcastSpec()
-	elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
-		self:BroadcastSpec()
+	elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" or event == "SPELLS_CHANGED" then
+		self:HandleLocalTalentChanged()
 	elseif event == "CHAT_MSG_ADDON" then
 		self:HandleAddonMessage(arg1, arg2, arg3, arg4)
 	end
@@ -4899,6 +5098,7 @@ function PPA:Initialize()
 		eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 		eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 		eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+		eventFrame:RegisterEvent("SPELLS_CHANGED")
 		eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 		eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3, arg4)
 			PPA:OnEvent(event, arg1, arg2, arg3, arg4)
@@ -4998,6 +5198,9 @@ PPA._test = {
 	end,
 	InstallLocalReportHook = function()
 		return PPA:InstallLocalReportHook()
+	end,
+	EnsurePallyPowerAdvancedOptions = function()
+		return PPA:EnsurePallyPowerAdvancedOptions()
 	end,
 	CanPaladinBuff = function(paladin, buff)
 		return PPA:CanPaladinBuff(paladin, buff)

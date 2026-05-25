@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [0.1.31] - 2026-05-25
+
+### Changed
+- Known pets now prefer Blessing of Kings and Blessing of Might before Blessing of Salvation, with single-target overrides when their owner class still needs class-wide Salvation.
+- PallyPowerAdvanced now injects an `Advanced` tab into PallyPower Classic with `PallyPowerAdvanced Settings` and Wisdom preference options for healers and paladin tanks.
+- Healer and paladin tank Wisdom priority can now follow those injected options independently.
+
+### Fixed
+- Talent/spec change events now refresh PallyPower talent state and rebroadcast PPA spec data immediately and after a short delay.
+- Improved-Wisdom paladins no longer keep stale Protection-style Kings priority when their active talent data no longer has Protection tank talents.
+
+### Tests
+- Add coverage for pet priority and overrides, the new healer Wisdom option, spec-swap talent refresh, raid pet roster collection, and stale Protection role handling.
+
 ## [0.1.30] - 2026-05-20
 
 ### Fixed

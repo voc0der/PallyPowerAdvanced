@@ -31,6 +31,15 @@ local function collectClassBuffs(plan, classID)
 	return buffs
 end
 
+local function findNormalBuff(plan, classID, targetName)
+	for _, classMap in pairs(plan.normalAssignments or {}) do
+		if classMap[classID] and classMap[classID][targetName] then
+			return classMap[classID][targetName]
+		end
+	end
+	return nil
+end
+
 local function countDistinctBuffs(classMap)
 	local seen = {}
 	local count = 0
@@ -254,6 +263,61 @@ test("prot paladin priority uses confirmed spec data over pally count heuristic"
 	PPA.peerSpecs["Tankadin"] = nil
 end)
 
+test("improved wisdom paladin no longer keeps stale protection priority after spec swap", function()
+	local tankadin = {name = "Tankadin", class = "PALADIN", classID = 5, role = "TANK"}
+	PPA.peerSpecs["Tankadin"] = {
+		activeTab = 1,
+		sanctityAura = 0,
+		holyShield = 0,
+		impSanc = 0,
+		kings = 1,
+		impMight = 0,
+		impWisdom = 2,
+	}
+
+	local priority = T.GetPriorityForUnit(tankadin, {pallyCount = 2})
+	assertEquals(priority[1], T.BUFF_WISDOM, "active improved wisdom spec should override stale tank role")
+	assertEquals(priority[2], T.BUFF_KINGS, "kings should follow improved wisdom")
+
+	PPA.peerSpecs["Tankadin"] = nil
+end)
+
+test("advanced setting can prefer wisdom over kings for paladin tanks", function()
+	local tankadin = {name = "Tankadin", class = "PALADIN", classID = 5, role = "TANK"}
+
+	local priority = T.GetPriorityForUnit(tankadin, {
+		pallyCount = 2,
+		alwaysPreferWisdomOnPaladinTanks = true,
+	})
+	assertEquals(priority[1], T.BUFF_WISDOM, "paladin tank override should put wisdom first at low pally count")
+	assertEquals(priority[2], T.BUFF_KINGS, "paladin tank override should keep wisdom above kings")
+
+	PPA.peerSpecs["Tankadin"] = {activeTab = 2, sanctityAura = 1, holyShield = 1, impSanc = 2, kings = 1, impMight = 0, impWisdom = 0}
+	priority = T.GetPriorityForUnit(tankadin, {
+		pallyCount = 5,
+		alwaysPreferWisdomOnPaladinTanks = true,
+	})
+	assertEquals(priority[1], T.BUFF_SANCTUARY, "prot sanctity tank should still keep sanctuary first")
+	assertEquals(priority[2], T.BUFF_WISDOM, "paladin tank override should put wisdom before kings with spec data")
+	assertEquals(priority[3], T.BUFF_KINGS, "paladin tank override should keep kings after wisdom")
+
+	PPA.peerSpecs["Tankadin"] = nil
+end)
+
+test("advanced paladin tank wisdom setting can be read from PallyPower options", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+	}
+	local tankadin = {name = "Tankadin", class = "PALADIN", classID = 5, role = "TANK"}
+
+	_G.PallyPower = {opt = {AlwaysPreferWisdomOnPaladinTanks = true}}
+	local priority = T.GetPriorityForUnit(tankadin, {pallyCount = 2})
+	assertEquals(priority[1], T.BUFF_WISDOM, "PallyPower option should prefer paladin tank wisdom")
+	assertEquals(priority[2], T.BUFF_KINGS, "PallyPower option should put wisdom above kings")
+
+	_G.PallyPower = old.PallyPower
+end)
+
 test("elemental shaman damage prefers wisdom where enhancement prefers might", function()
 	local elemental = {name = "Stormbolt", class = "SHAMAN", classID = 9, role = "DAMAGER", spec = "ELEMENTAL"}
 	local enhancement = {name = "Windfury", class = "SHAMAN", classID = 9, role = "DAMAGER", spec = "ENHANCEMENT"}
@@ -285,6 +349,59 @@ test("hunters prefer wisdom over light for damage", function()
 	local buffs = collectClassBuffs(T.BuildSmartPlan(context), 6)
 	assertEquals(buffs[T.BUFF_WISDOM], true, "hunters should receive wisdom when slots allow")
 	assertEquals(buffs[T.BUFF_LIGHT], nil, "hunters should not receive light before wisdom")
+end)
+
+test("known pets prefer kings and might before salvation", function()
+	local hunterPet = {name = "Bitey", class = "HUNTER", classID = 6, role = "DAMAGER", unit = "raidpet6", isPet = true}
+	local felguard = {name = "Felguard", class = "WARLOCK", classID = 8, role = "DAMAGER", unit = "raidpet8", isPet = true}
+
+	local hunterPriority = T.GetPriorityForUnit(hunterPet, {healingPaladinPresent = true})
+	assertEquals(hunterPriority[1], T.BUFF_KINGS, "hunter pet first priority")
+	assertEquals(hunterPriority[2], T.BUFF_MIGHT, "hunter pet second priority")
+	assertEquals(hunterPriority[3], T.BUFF_SALVATION, "hunter pet salvation after kings and might")
+
+	local felguardPriority = T.GetPriorityForUnit(felguard, {healingPaladinPresent = true})
+	assertEquals(felguardPriority[1], T.BUFF_KINGS, "felguard first priority")
+	assertEquals(felguardPriority[2], T.BUFF_MIGHT, "felguard second priority")
+	assertEquals(felguardPriority[3], T.BUFF_SALVATION, "felguard salvation after kings and might")
+end)
+
+test("known pets receive might override before class salvation", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 2,
+		healingPaladinPresent = true,
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 2), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Retone", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+		},
+		players = {
+			{name = "Shots", class = "HUNTER", classID = 6, role = "DAMAGER"},
+			{name = "Bitey", class = "HUNTER", classID = 6, role = "DAMAGER", unit = "raidpet6", isPet = true},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(findNormalBuff(plan, 6, "Bitey"), T.BUFF_MIGHT, "pet should get might instead of class salvation")
+end)
+
+test("felguard pets receive might override before warlock class salvation", function()
+	local context = {
+		playerName = "Holyone",
+		pallyCount = 2,
+		healingPaladinPresent = true,
+		paladins = {
+			{name = "Holyone", role = "HEALER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7, 2), [T.BUFF_MIGHT] = skill(7), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+			{name = "Retone", role = "DAMAGER", hasAddon = true, skills = {[T.BUFF_WISDOM] = skill(7), [T.BUFF_MIGHT] = skill(7, 2), [T.BUFF_KINGS] = skill(1), [T.BUFF_SALVATION] = skill(1), [T.BUFF_LIGHT] = skill(4)}},
+		},
+		players = {
+			{name = "Dots", class = "WARLOCK", classID = 8, role = "DAMAGER"},
+			{name = "Felguard", class = "WARLOCK", classID = 8, role = "DAMAGER", unit = "raidpet8", isPet = true},
+		},
+	}
+
+	local plan = T.BuildSmartPlan(context)
+	assertEquals(findNormalBuff(plan, 8, "Felguard"), T.BUFF_MIGHT, "felguard should get might instead of class salvation")
 end)
 
 test("physical and caster classes keep useful late blessings without useless fillers", function()
@@ -676,6 +793,73 @@ test("improved wisdom paladin gives healer priest wisdom", function()
 	assertEquals(plan.assignments.Holyone[3], T.BUFF_WISDOM, "improved wisdom should stay preferred for healer priests")
 end)
 
+test("advanced setting can prefer wisdom for healers without improved wisdom", function()
+	local priest = {name = "Prayer", class = "PRIEST", classID = 3, role = "HEALER"}
+
+	local priority = T.GetPriorityForUnit(priest, {improvedWisdomPaladinPresent = false})
+	assertEquals(priority[1], T.BUFF_KINGS, "default unimproved wisdom healer priority should prefer kings")
+
+	priority = T.GetPriorityForUnit(priest, {
+		improvedWisdomPaladinPresent = false,
+		alwaysPreferWisdomOnHealers = true,
+	})
+	assertEquals(priority[1], T.BUFF_WISDOM, "advanced setting should prefer wisdom")
+	assertEquals(priority[2], T.BUFF_KINGS, "kings should follow wisdom")
+end)
+
+test("advanced healer wisdom setting can be read from PallyPower options", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+	}
+	local priest = {name = "Prayer", class = "PRIEST", classID = 3, role = "HEALER"}
+
+	_G.PallyPower = {opt = {AlwaysPreferWisdomOnHealers = true}}
+	local priority = T.GetPriorityForUnit(priest, {improvedWisdomPaladinPresent = false})
+	assertEquals(priority[1], T.BUFF_WISDOM, "PallyPower option should prefer healer wisdom")
+
+	_G.PallyPower = old.PallyPower
+end)
+
+test("PPA injects the Advanced tab into PallyPower options", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		LibStub = _G.LibStub,
+	}
+	local notified
+
+	_G.LibStub = function(name)
+		assertEquals(name, "AceConfigRegistry-3.0", "AceConfig registry lookup")
+		return {
+			NotifyChange = function(_, appName)
+				notified = appName
+			end,
+		}
+	end
+	_G.PallyPower = {
+		opt = {},
+		options = {args = {}},
+	}
+
+	assertEquals(T.EnsurePallyPowerAdvancedOptions(), true, "options should be injected")
+	local advanced = _G.PallyPower.options.args.advanced
+	assertEquals(advanced.name, "Advanced", "tab name")
+	assertEquals(advanced.args.advanced_settings.name, "PallyPowerAdvanced Settings", "header")
+	local option = advanced.args.advanced_settings.args.always_prefer_wisdom_on_healers
+	assertEquals(option.name, "Always Prefer Wisdom on Healers", "setting name")
+	assertEquals(option.get(), false, "default should be false")
+	option.set(nil, true)
+	assertEquals(_G.PallyPower.opt.AlwaysPreferWisdomOnHealers, true, "setting should write to PallyPower profile")
+	local tankOption = advanced.args.advanced_settings.args.always_prefer_wisdom_on_paladin_tanks
+	assertEquals(tankOption.name, "Always Prefer Wisdom for Paladin Tanks", "paladin tank setting name")
+	assertEquals(tankOption.get(), false, "paladin tank default should be false")
+	tankOption.set(nil, true)
+	assertEquals(_G.PallyPower.opt.AlwaysPreferWisdomOnPaladinTanks, true, "paladin tank setting should write to PallyPower profile")
+	assertEquals(notified, "PallyPower", "AceConfig should be notified")
+
+	_G.PallyPower = old.PallyPower
+	_G.LibStub = old.LibStub
+end)
+
 test("aura assignment gives improved devotion paladin devo first", function()
 	local context = baseContext()
 	context.players = {
@@ -853,6 +1037,36 @@ test("local talent read captures improved blessing ranks", function()
 	_G.GetNumTalents = old.GetNumTalents
 	_G.GetTalentTabInfo = old.GetTalentTabInfo
 	_G.GetTalentInfo = old.GetTalentInfo
+end)
+
+test("talent update events refresh PallyPower state before broadcasting specs", function()
+	local old = {
+		RefreshPallyPowerTalentState = PPA.RefreshPallyPowerTalentState,
+		BroadcastSpec = PPA.BroadcastSpec,
+		C_Timer = _G.C_Timer,
+	}
+	local refreshes = 0
+	local broadcasts = 0
+
+	PPA.RefreshPallyPowerTalentState = function()
+		refreshes = refreshes + 1
+	end
+	PPA.BroadcastSpec = function()
+		broadcasts = broadcasts + 1
+	end
+	_G.C_Timer = {
+		After = function(_, callback)
+			callback()
+		end,
+	}
+
+	PPA:OnEvent("ACTIVE_TALENT_GROUP_CHANGED")
+	assertEquals(refreshes, 2, "talent event should refresh immediately and after delayed API settle")
+	assertEquals(broadcasts, 2, "talent event should broadcast immediately and after delayed API settle")
+
+	PPA.RefreshPallyPowerTalentState = old.RefreshPallyPowerTalentState
+	PPA.BroadcastSpec = old.BroadcastSpec
+	_G.C_Timer = old.C_Timer
 end)
 
 test("PPA spec data controls improved sanctity aura assignment eligibility", function()
@@ -1095,6 +1309,74 @@ test("runtime context marks battlegrounds and arenas as pvp assignment contexts"
 	_G.AllPallys = old.AllPallys
 	_G.IsInInstance = old.IsInInstance
 	PPA.CollectRoster = old.CollectRoster
+end)
+
+test("runtime roster includes visible raid pets without replacing them with owner names", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		IsInRaid = _G.IsInRaid,
+		UnitExists = _G.UnitExists,
+		GetUnitName = _G.GetUnitName,
+		UnitName = _G.UnitName,
+		UnitClassBase = _G.UnitClassBase,
+		UnitClass = _G.UnitClass,
+		GetRaidRosterInfo = _G.GetRaidRosterInfo,
+		UnitGroupRolesAssigned = _G.UnitGroupRolesAssigned,
+		MAX_RAID_MEMBERS = _G.MAX_RAID_MEMBERS,
+	}
+
+	_G.PallyPower = {opt = {ShowPets = true}}
+	_G.MAX_RAID_MEMBERS = 1
+	_G.IsInRaid = function()
+		return true
+	end
+	_G.UnitExists = function(unit)
+		return unit == "raid1" or unit == "raidpet1"
+	end
+	_G.GetUnitName = function(unit)
+		if unit == "raid1" then
+			return "Hunterone"
+		elseif unit == "raidpet1" then
+			return "Bitey"
+		end
+		return nil
+	end
+	_G.UnitName = _G.GetUnitName
+	_G.UnitClassBase = function(unit)
+		if unit == "raid1" or unit == "raidpet1" then
+			return "HUNTER"
+		end
+		return nil
+	end
+	_G.UnitClass = function(unit)
+		if unit == "raid1" or unit == "raidpet1" then
+			return "Hunter", "HUNTER"
+		end
+		return nil
+	end
+	_G.GetRaidRosterInfo = function()
+		return "Hunterone", 0, 2, 70, "Hunter", "HUNTER", "Zone", true, false, "DAMAGER"
+	end
+	_G.UnitGroupRolesAssigned = function()
+		return "DAMAGER"
+	end
+
+	local roster = PPA:CollectRoster()
+	assertEquals(#roster, 2, "player and pet should be collected")
+	assertEquals(roster[2].name, "Bitey", "pet should keep pet name")
+	assertEquals(roster[2].isPet, true, "pet marker should be preserved")
+	assertEquals(roster[2].subgroup, 2, "pet should inherit owner subgroup")
+
+	_G.PallyPower = old.PallyPower
+	_G.IsInRaid = old.IsInRaid
+	_G.UnitExists = old.UnitExists
+	_G.GetUnitName = old.GetUnitName
+	_G.UnitName = old.UnitName
+	_G.UnitClassBase = old.UnitClassBase
+	_G.UnitClass = old.UnitClass
+	_G.GetRaidRosterInfo = old.GetRaidRosterInfo
+	_G.UnitGroupRolesAssigned = old.UnitGroupRolesAssigned
+	_G.MAX_RAID_MEMBERS = old.MAX_RAID_MEMBERS
 end)
 
 test("assignment alert reports class-wide changes for the local paladin", function()
