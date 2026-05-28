@@ -1551,7 +1551,7 @@ test("runtime context marks battlegrounds and arenas as pvp assignment contexts"
 	PPA.CollectRoster = old.CollectRoster
 end)
 
-test("runtime roster includes visible raid pets without replacing them with owner names", function()
+test("runtime roster uses owner class for visible raid pets without replacing pet names", function()
 	local old = {
 		PallyPower = _G.PallyPower,
 		IsInRaid = _G.IsInRaid,
@@ -1575,27 +1575,31 @@ test("runtime roster includes visible raid pets without replacing them with owne
 	end
 	_G.GetUnitName = function(unit)
 		if unit == "raid1" then
-			return "Hunterone"
+			return "Warlockone"
 		elseif unit == "raidpet1" then
-			return "Bitey"
+			return "Felguard"
 		end
 		return nil
 	end
 	_G.UnitName = _G.GetUnitName
 	_G.UnitClassBase = function(unit)
-		if unit == "raid1" or unit == "raidpet1" then
-			return "HUNTER"
+		if unit == "raid1" then
+			return "WARLOCK"
+		elseif unit == "raidpet1" then
+			return "PALADIN"
 		end
 		return nil
 	end
 	_G.UnitClass = function(unit)
-		if unit == "raid1" or unit == "raidpet1" then
-			return "Hunter", "HUNTER"
+		if unit == "raid1" then
+			return "Warlock", "WARLOCK"
+		elseif unit == "raidpet1" then
+			return "Paladin", "PALADIN"
 		end
 		return nil
 	end
 	_G.GetRaidRosterInfo = function()
-		return "Hunterone", 0, 2, 70, "Hunter", "HUNTER", "Zone", true, false, "DAMAGER"
+		return "Warlockone", 0, 2, 70, "Warlock", "WARLOCK", "Zone", true, false, "DAMAGER"
 	end
 	_G.UnitGroupRolesAssigned = function()
 		return "DAMAGER"
@@ -1603,7 +1607,9 @@ test("runtime roster includes visible raid pets without replacing them with owne
 
 	local roster = PPA:CollectRoster()
 	assertEquals(#roster, 2, "player and pet should be collected")
-	assertEquals(roster[2].name, "Bitey", "pet should keep pet name")
+	assertEquals(roster[2].name, "Felguard", "pet should keep pet name")
+	assertEquals(roster[2].class, "WARLOCK", "pet should inherit owner class")
+	assertEquals(roster[2].classID, 8, "pet should use owner class ID")
 	assertEquals(roster[2].isPet, true, "pet marker should be preserved")
 	assertEquals(roster[2].subgroup, 2, "pet should inherit owner subgroup")
 
@@ -1617,6 +1623,31 @@ test("runtime roster includes visible raid pets without replacing them with owne
 	_G.GetRaidRosterInfo = old.GetRaidRosterInfo
 	_G.UnitGroupRolesAssigned = old.UnitGroupRolesAssigned
 	_G.MAX_RAID_MEMBERS = old.MAX_RAID_MEMBERS
+end)
+
+test("runtime context ignores pets reported as paladins as assignment casters", function()
+	local old = {
+		PallyPower = _G.PallyPower,
+		AllPallys = _G.AllPallys,
+		CollectRoster = PPA.CollectRoster,
+	}
+
+	_G.PallyPower = {player = "Holyone"}
+	_G.AllPallys = {Holyone = {}}
+	PPA.CollectRoster = function()
+		return {
+			{name = "Holyone", fullName = "Holyone", class = "PALADIN", classID = 5, role = "HEALER"},
+			{name = "Felguard", fullName = "Felguard", class = "PALADIN", classID = 5, role = "DAMAGER", unit = "raidpet8", isPet = true},
+		}
+	end
+
+	local context = T.BuildRuntimeContext(false)
+	assertEquals(#context.paladins, 1, "only real paladins should become assignment casters")
+	assertEquals(context.paladins[1].name, "Holyone", "pet should not be included as a paladin caster")
+
+	_G.PallyPower = old.PallyPower
+	_G.AllPallys = old.AllPallys
+	PPA.CollectRoster = old.CollectRoster
 end)
 
 test("assignment alert reports class-wide changes for the local paladin", function()

@@ -1950,6 +1950,47 @@ local function GetUnitNameSafe(unit)
 	return nil
 end
 
+local function GetUnitClassFileSafe(unit)
+	if not unit then
+		return nil
+	end
+	if _G.UnitClassBase then
+		local classFile = _G.UnitClassBase(unit)
+		if classFile then
+			return classFile
+		end
+	end
+	if _G.UnitClass then
+		return select(2, _G.UnitClass(unit))
+	end
+	return nil
+end
+
+local function GetPetOwnerUnit(unit)
+	if unit == "pet" then
+		return "player"
+	end
+	local raidIndex = type(unit) == "string" and string.match(unit, "^raidpet(%d+)$")
+	if raidIndex then
+		return "raid" .. raidIndex
+	end
+	local partyIndex = type(unit) == "string" and string.match(unit, "^partypet(%d+)$")
+	if partyIndex then
+		return "party" .. partyIndex
+	end
+	return nil
+end
+
+local function GetPetOwnerClassFile(unit, raidIndex)
+	if raidIndex and _G.GetRaidRosterInfo then
+		local _, _, _, _, _, rosterClass = _G.GetRaidRosterInfo(raidIndex)
+		if rosterClass then
+			return rosterClass
+		end
+	end
+	return GetUnitClassFileSafe(GetPetOwnerUnit(unit))
+end
+
 local function RemoveRealmName(name)
 	if _G.PallyPower and _G.PallyPower.RemoveRealmName then
 		return _G.PallyPower:RemoveRealmName(name)
@@ -3502,12 +3543,9 @@ function PPA:CollectRoster()
 		local isPet = unitInfo[3]
 		if (not _G.UnitExists) or _G.UnitExists(unit) then
 			local fullName = GetUnitNameSafe(unit)
-			local classFile
-			if _G.UnitClassBase then
-				classFile = _G.UnitClassBase(unit)
-			elseif _G.UnitClass then
-				classFile = select(2, _G.UnitClass(unit))
-			end
+			local classFile = isPet
+				and (GetPetOwnerClassFile(unit, raidIndex) or GetUnitClassFileSafe(unit))
+				or GetUnitClassFileSafe(unit)
 
 			if fullName and classFile and self:GetClassID(classFile) then
 				local raidRole
@@ -3585,7 +3623,7 @@ function PPA:BuildRuntimeContext(guess)
 	local paladins = {}
 	local pvpInstanceType = self:GetCurrentPvPInstanceType()
 	for _, unit in ipairs(players) do
-		if unit.class == "PALADIN" then
+		if unit.class == "PALADIN" and unit.isPet ~= true then
 			local hasAddon = type(_G.AllPallys) == "table" and type(_G.AllPallys[unit.name]) == "table"
 			local specData = self:GetUnitSpecData(unit.name)
 			local skills = hasAddon and self:BuildPaladinSkills(unit.name) or {}

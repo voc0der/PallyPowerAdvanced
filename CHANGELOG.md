@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.41] - 2026-05-28
+
+### Fixed
+- Fixed a bug where some warlock pets get assigned as a paladin.
+
+### Tests
+- Add regressions for warlock pet misreported as PALADIN.
+
 ## [0.1.40] - 2026-05-25
 
 ### Fixed
