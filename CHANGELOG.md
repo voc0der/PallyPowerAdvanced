@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+## [0.1.42] - 2026-07-07
+
+### Changed
+- Bumped TOC interface to `20506` for the TBC Anniversary `2.5.6` (68502) client patch.
+
+### Tests
+- Verified against the `wow-ui-source` `classic_anniversary` diff between `2.5.5` (68101) and `2.5.6` (68502): role/group/unit APIs used by this addon (`UnitGroupRolesAssigned`, `GetRaidRosterInfo`, `UnitClass`, `UnitClassBase`, `UnitExists`, `UnitIsGroupLeader`, `UnitName`, `IsInGroup`, `IsInRaid`, `IsInRaidGroup`, `UnitIsTank`, `UnitIsKnownPet`, `UnitNamesMatch`), `C_ChatInfo` addon messaging, `StaticPopup`, and the `BasicFrameTemplateWithInset` template are all unchanged or additive-only. No code changes required.
+
 ## [0.1.41] - 2026-05-28
 
 ### Fixed

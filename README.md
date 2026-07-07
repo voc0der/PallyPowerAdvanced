@@ -12,7 +12,7 @@
 - Alerts you when another paladin changes your assignments
 - Plays a one-minute warning sound when one of your assigned blessings is about to expire
 
-Current version: `0.1.41`
+Current version: `0.1.42`
 
 ## Smart Assign
 
@@ -71,7 +71,7 @@ Current version: `0.1.41`
 ## Scope
 
 - Target client: TBC Anniversary Classic
-- TOC interface: `20505`
+- TOC interface: `20506`
 - Requires `PallyPower`
 
 ## Contributing
