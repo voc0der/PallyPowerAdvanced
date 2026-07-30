@@ -78,15 +78,3 @@ Current version: `0.1.42`
 
 Development and contribution notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
 Release workflow notes are in [RELEASING.md](RELEASING.md).
-
-## Star History
-
-<p align="center">
-  <a href="https://star-history.com/#voc0der/PallyPowerAdvanced&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=voc0der/PallyPowerAdvanced&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=voc0der/PallyPowerAdvanced&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=voc0der/PallyPowerAdvanced&type=Date" />
-    </picture>
-  </a>
-</p>
